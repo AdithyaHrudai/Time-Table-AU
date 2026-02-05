@@ -1,0 +1,182 @@
+{
+  "identity": {
+    "name": "E1",
+    "persona": "Creative Designer",
+    "vibe": "Academic Swiss - Professional, Trustworthy, Organized",
+    "principles": [
+      "Fusion over Imitation: Mix Academic Prestige with SaaS Precision",
+      "Content is King: Data clarity is the priority",
+      "Negative Space: Use whitespace to reduce cognitive load",
+      "Contrast: High contrast for readability in complex grids"
+    ]
+  },
+  "typography": {
+    "headings": {
+      "family": "Merriweather, serif",
+      "weights": ["400", "700", "900"],
+      "usage": "All section titles, page headers, and hero text. Adds academic authority."
+    },
+    "body": {
+      "family": "Inter, sans-serif",
+      "weights": ["400", "500", "600"],
+      "usage": "All data tables, form inputs, and long-form text. Ensures maximum legibility."
+    },
+    "mono": {
+      "family": "JetBrains Mono, monospace",
+      "usage": "Time slots, codes, and technical data."
+    }
+  },
+  "colors": {
+    "palette": {
+      "primary": {
+        "name": "Academic Navy",
+        "hex": "#0f172a",
+        "usage": "Primary navigation, heavy text, active states"
+      },
+      "brand": {
+        "name": "Royal Blue",
+        "hex": "#2563eb",
+        "usage": "Primary buttons, links, key highlights"
+      },
+      "secondary": {
+        "name": "Slate Grey",
+        "hex": "#64748b",
+        "usage": "Secondary text, borders, inactive icons"
+      },
+      "background": {
+        "name": "Paper White",
+        "hex": "#f8fafc",
+        "usage": "App background (Slate 50)"
+      },
+      "surface": {
+        "name": "Pure White",
+        "hex": "#ffffff",
+        "usage": "Cards, tables, modals"
+      },
+      "success": {
+        "name": "Emerald",
+        "hex": "#10b981",
+        "usage": "Success states, available slots"
+      },
+      "warning": {
+        "name": "Amber",
+        "hex": "#f59e0b",
+        "usage": "Warnings, conflicts"
+      },
+      "error": {
+        "name": "Rose",
+        "hex": "#e11d48",
+        "usage": "Errors, destructive actions, occupied slots"
+      }
+    },
+    "theme_strategy": "Light Mode Only (Professional Academic). Dark mode is available but secondary.",
+    "gradients": "None. Use flat, solid colors for maximum clarity."
+  },
+  "visual_enhancers": {
+    "textures": {
+      "noise": "Subtle grain overlay on the sidebar to mimic high-quality paper.",
+      "glass": "Crystal Glass effect for sticky headers: backdrop-blur-xl bg-white/80 border-b border-slate-200/50."
+    },
+    "shadows": {
+      "card": "shadow-sm hover:shadow-md transition-shadow duration-200",
+      "dropdown": "shadow-lg ring-1 ring-black/5",
+      "modal": "shadow-2xl"
+    },
+    "borders": {
+      "default": "border border-slate-200",
+      "active": "border-blue-500 ring-2 ring-blue-100"
+    },
+    "radius": {
+      "default": "rounded-lg",
+      "button": "rounded-md",
+      "card": "rounded-xl"
+    }
+  },
+  "layout_strategy": {
+    "dashboard": {
+      "type": "Bento Grid (Mode A)",
+      "grid_cols": "grid-cols-1 md:grid-cols-4 lg:grid-cols-12",
+      "gap": "gap-6",
+      "padding": "p-8"
+    },
+    "timetable": {
+      "type": "High Density Grid (Mode B)",
+      "grid_cols": "grid-cols-6 (Mon-Sat)",
+      "gap": "gap-px (1px borders)",
+      "padding": "p-0"
+    },
+    "container": {
+      "max_width": "max-w-7xl mx-auto",
+      "padding": "px-4 sm:px-6 lg:px-8"
+    }
+  },
+  "components": {
+    "buttons": {
+      "primary": "bg-blue-600 hover:bg-blue-700 text-white font-medium shadow-sm",
+      "secondary": "bg-white border border-slate-300 text-slate-700 hover:bg-slate-50",
+      "ghost": "hover:bg-slate-100 text-slate-600"
+    },
+    "cards": {
+      "style": "bg-white border border-slate-200 shadow-sm rounded-xl overflow-hidden",
+      "header": "px-6 py-4 border-b border-slate-100 bg-slate-50/50",
+      "body": "p-6"
+    },
+    "inputs": {
+      "style": "border-slate-300 focus:border-blue-500 focus:ring-blue-500 rounded-md shadow-sm"
+    },
+    "tables": {
+      "style": "w-full text-sm text-left text-slate-600",
+      "header": "text-xs text-slate-700 uppercase bg-slate-50 font-semibold",
+      "row": "bg-white border-b border-slate-100 hover:bg-slate-50"
+    }
+  },
+  "image_urls": {
+    "landing_hero": {
+      "url": "https://images.unsplash.com/photo-1680444873773-7c106c23ac52?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NTY2ODh8MHwxfHNlYXJjaHwxfHx1bml2ZXJzaXR5JTIwY2FtcHVzJTIwYXJjaGl0ZWN0dXJlJTIwbW9kZXJufGVufDB8fHx8MTc3MDMxMzc3Nnww&ixlib=rb-4.1.0&q=85",
+      "description": "Modern university building with stairs, clean and aspirational. Use for Landing Page Hero background with overlay."
+    },
+    "login_bg": {
+      "url": "https://images.unsplash.com/photo-1718327453695-4d32b94c90a4?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjA1NDh8MHwxfHNlYXJjaHwxfHx1bml2ZXJzaXR5JTIwc3R1ZGVudHMlMjBzdHVkeWluZyUyMGxpYnJhcnl8ZW58MHx8fHwxNzcwMzEzNzgxfDA&ixlib=rb-4.1.0&q=85",
+      "description": "Library interior with books. Use for Authentication page side panel."
+    },
+    "feature_faculty": {
+      "url": "https://images.unsplash.com/photo-1758270704262-ecc82b23dc37?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NTYxODF8MHwxfHNlYXJjaHwyfHxwcm9mZXNzb3IlMjB0ZWFjaGluZyUyMGxlY3R1cmUlMjBoYWxsfGVufDB8fHx8MTc3MDMxMzc3OXww&ixlib=rb-4.1.0&q=85",
+      "description": "Professor teaching in a classroom. Use for 'Faculty Management' feature section."
+    },
+    "feature_campus": {
+      "url": "https://images.unsplash.com/photo-1685456891912-c09f9cd252eb?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NTY2ODh8MHwxfHNlYXJjaHwyfHx1bml2ZXJzaXR5JTIwY2FtcHVzJTIwYXJjaGl0ZWN0dXJlJTIwbW9kZXJufGVufDB8fHx8MTc3MDMxMzc3Nnww&ixlib=rb-4.1.0&q=85",
+      "description": "Building with clock. Use for 'Timetable Scheduling' feature section."
+    }
+  },
+  "instructions_to_main_agent": [
+    "1. THEME ENFORCEMENT: The user explicitly requested a 'Professional Light Theme'. Do not default to dark mode. Ensure all text has high contrast (Slate 900 on White).",
+    "2. FONT SETUP: Import 'Merriweather' (400, 700, 900) and 'Inter' (400, 500, 600) from Google Fonts in index.css.",
+    "3. LAYOUT: Use the 'Bento Grid' strategy for the Dashboard. Use 'High Density' grid for the Timetable view.",
+    "4. COMPONENTS: Use Shadcn UI components but customize them to match the 'Academic Swiss' style (sharper corners, slate borders).",
+    "5. PDF EXPORT: This is a key feature. Ensure the Timetable view is printable. Use a white background with black text for the print view.",
+    "6. DATA ENTRY: The prompt forbids CSV upload. You must build robust, user-friendly forms for manual entry of Faculty, Rooms, and Sections.",
+    "7. ALGORITHM: The core value is 'No Overlaps'. The UI must clearly show conflicts if they happen during manual priority setting.",
+    "8. ACCESSIBILITY: Ensure all form inputs have labels and all interactive elements have focus states."
+  ],
+  "UNIVERSAL_GUIDELINES_FOR_MAIN_AGENT": [
+    "You tend to converge toward generic, 'on distribution' outputs. In frontend design, this creates what users call the 'AI slop' aesthetic. Avoid this: make creative, distinctive frontends that surprise and delight.",
+    "Dark colors look good when used independently without gradients. DO NOT use dark colors as gradients",
+    "Don't make generic centered layouts, simplistic gradients, and uniform styling.",
+    "Create depth through layered design elements with z-index hierarchy",
+    "Use glass-morphism effects with backdrop filters (12-24px blur)",
+    "You MUST NOT apply universal transition. Eg: transition: all. This results in breaking transforms. Always add transitions for specific interactive elements like button, input excluding transforms",
+    "You MUST NOT center align the app container, ie do not add .App { text-align: center; } in the css file. This disrupts the human natural reading flow of text",
+    "Always use modern button styles like pill-shaped, or sharp button with interaction animations & color relevant to the app style",
+    "NEVER: use AI assistant Emoji characters like 🤖🧠💭💡🔮🎯📚🎭🎬🎪🎉🎊🎁🎀🎂🍰🎈🎨🎰💰💵💳🏦💎🪙💸🤑📊📈📉💹🔢🏆🥇 etc for icons.",
+    "Every interaction needs micro-animations - hover states, transitions, parallax effects, and entrance animations. Static = dead.",
+    "Use 2-3x more spacing than feels comfortable. Cramped designs look cheap.",
+    "Subtle grain textures, noise overlays, custom cursors, selection states, and loading animations: separates good from extraordinary.",
+    "Main agent relies on these image URLs. Missing categories (especially sponsor logos) = main agent will use placeholder text which is FORBIDDEN",
+    "Prioritize using pre-existing components from src/components/ui when applicable",
+    "Create new components that match the style and conventions of existing components when needed",
+    "Examine existing components to understand the project's component patterns before creating new ones",
+    "Components MUST use named exports (export const ComponentName = ...)",
+    "Pages MUST use default exports (export default function PageName() {...})",
+    "Use 'sonner' for toasts. Sonner component are located in /app/src/components/ui/sonner.tsx"
+  ]
+}
