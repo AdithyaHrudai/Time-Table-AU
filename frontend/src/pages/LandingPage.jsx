@@ -23,12 +23,12 @@ export default function LandingPage({ user }) {
                 </Link>
               ) : (
                 <>
-                  <Link to="/login">
+                  <Link to="/dashboard">
                     <Button data-testid="login-btn" variant="ghost" className="text-slate-700 hover:text-slate-900">
                       Sign In
                     </Button>
                   </Link>
-                  <Link to="/register">
+                  <Link to="/dashboard">
                     <Button data-testid="register-btn" className="bg-blue-600 hover:bg-blue-700 text-white btn-primary">
                       Get Started
                     </Button>
@@ -58,7 +58,7 @@ export default function LandingPage({ user }) {
               and generate print-ready timetables with our powerful constraint-based algorithm.
             </p>
             <div className="flex flex-wrap gap-4">
-              <Link to="/register">
+              <Link to="/dashboard">
                 <Button data-testid="hero-get-started-btn" size="lg" className="bg-blue-600 hover:bg-blue-700 text-white btn-primary px-8 py-6 text-lg">
                   Start Free
                   <ArrowRight className="w-5 h-5 ml-2" />
@@ -198,7 +198,7 @@ export default function LandingPage({ user }) {
             Join hundreds of department heads who've switched to automated timetabling. 
             Focus on what matters—teaching and research.
           </p>
-          <Link to="/register">
+          <Link to="/dashboard">
             <Button data-testid="cta-get-started-btn" size="lg" className="bg-blue-600 hover:bg-blue-700 text-white btn-primary px-10 py-6 text-lg">
               Create Your First Timetable
               <ArrowRight className="w-5 h-5 ml-2" />

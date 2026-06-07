@@ -80,16 +80,13 @@ These are intentionally hardcoded — the user requested AU's schedule and remov
 
 ## Auth model
 
-JWT in `Authorization: Bearer <token>`, 7-day expiry. `get_current_user` dependency wraps every `/api/sessions/...` endpoint. Email/password auth uses bcrypt.
+**There is no authentication.** The app is a single shared department workspace. `get_current_user` (in `server.py`) is a dependency that always returns a fixed `SHARED_USER` (`user_id="shared"`), so every `/api/...` endpoint works without any token and all data is owned by that one user — everyone who opens the app sees the same sessions/subjects/faculty/timetables. This matches the single-admin design and removes login/signup entirely. The old auth/JWT/OAuth helpers and endpoints remain in the file but are effectively unused; the frontend has no login/register pages.
 
-Google OAuth uses the standard OAuth 2.0 authorization-code flow (free — create a client at [console.cloud.google.com](https://console.cloud.google.com), no third-party service):
+To reintroduce per-user auth later, restore the real body of `get_current_user` and re-scope the frontend `AuthContext` in `App.js`.
 
-1. Frontend "Continue with Google" button → `GET {BACKEND}/api/auth/google/login`.
-2. Backend redirects to Google's consent screen, Google redirects back to `GET /api/auth/google/callback?code=...`.
-3. Backend exchanges the code for a token, fetches the profile, upserts the user, issues our JWT, and redirects to `{FRONTEND_URL}/dashboard#token=<jwt>`.
-4. `App.js`'s `AuthCallback` reads `#token=` from the hash, calls `/api/auth/me`, and logs in.
+## Hosting model (single origin)
 
-Config lives in `backend/.env`: `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_REDIRECT_URI` (must match the URI registered in Google Cloud), `FRONTEND_URL`, `JWT_SECRET`. If `GOOGLE_CLIENT_ID` is blank, `/api/auth/google/login` returns 503 and only email/password auth works.
+In production the React build is served **by the FastAPI app itself** (see the "SERVE REACT BUILD" block at the bottom of `server.py`): `/api/*` is the API, everything else falls back to `index.html` for client-side routing. So there's one URL and no CORS. The whole thing ships as one Docker image (`Dockerfile`, multi-stage: Node build → Python serve) deployed as a single Render service (`render.yaml`). Frontend uses **relative** API URLs (`axios.defaults.baseURL = ""`); `REACT_APP_BACKEND_URL` is only an override for split local dev. See `DEPLOY.md`.
 
 ## When extending the generator
 

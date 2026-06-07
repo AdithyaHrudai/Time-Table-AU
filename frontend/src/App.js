@@ -1,13 +1,11 @@
-import { useEffect, useState, useRef } from "react";
+import { useState } from "react";
 import "@/App.css";
-import { BrowserRouter, Routes, Route, Navigate, useLocation, useNavigate } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import axios from "axios";
 import { Toaster } from "@/components/ui/sonner";
 
 // Pages
 import LandingPage from "@/pages/LandingPage";
-import LoginPage from "@/pages/LoginPage";
-import RegisterPage from "@/pages/RegisterPage";
 import Dashboard from "@/pages/Dashboard";
 import SessionSetup from "@/pages/SessionSetup";
 import FacultyManagement from "@/pages/FacultyManagement";
@@ -16,139 +14,43 @@ import SubjectsManagement from "@/pages/SubjectsManagement";
 import FacultyChoices from "@/pages/FacultyChoices";
 import TimetableView from "@/pages/TimetableView";
 
-const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
+// Single-origin: the React app is served by the FastAPI backend, so API calls
+// are relative (same host). REACT_APP_BACKEND_URL is only used as an override
+// for split local dev; default to "" (relative) which is what production uses.
+const BACKEND_URL = process.env.REACT_APP_BACKEND_URL || "";
 
 // Configure axios defaults
 axios.defaults.baseURL = BACKEND_URL;
 axios.defaults.withCredentials = true;
 
-// Auth Context
+// Auth has been removed — this is a single shared department workspace. Everyone
+// who opens the app is the same "Department" user, so there's no login/signup.
+const SHARED_USER = { user_id: "shared", name: "Department", email: "department@local" };
+
 export const AuthContext = ({ children }) => {
-  const [user, setUser] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [token, setToken] = useState(localStorage.getItem("token"));
+  const [user] = useState(SHARED_USER);
 
-  useEffect(() => {
-    const checkAuth = async () => {
-      const savedToken = localStorage.getItem("token");
-      if (savedToken) {
-        try {
-          const response = await axios.get("/api/auth/me", {
-            headers: { Authorization: `Bearer ${savedToken}` }
-          });
-          setUser(response.data);
-          setToken(savedToken);
-        } catch (error) {
-          localStorage.removeItem("token");
-          setToken(null);
-        }
-      }
-      setLoading(false);
-    };
-    checkAuth();
-  }, []);
+  // login/logout are kept as no-ops so existing pages that receive them as props
+  // don't break. There is nothing to authenticate.
+  const login = () => {};
+  const logout = () => {};
 
-  const login = (userData, accessToken) => {
-    setUser(userData);
-    setToken(accessToken);
-    localStorage.setItem("token", accessToken);
-  };
-
-  const logout = async () => {
-    try {
-      await axios.post("/api/auth/logout");
-    } catch (e) {
-      console.error("Logout error:", e);
-    }
-    setUser(null);
-    setToken(null);
-    localStorage.removeItem("token");
-  };
-
-  if (loading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-slate-50">
-        <div className="text-center">
-          <div className="w-12 h-12 border-4 border-blue-600 border-t-transparent rounded-full spinner mx-auto mb-4"></div>
-          <p className="text-slate-600">Loading...</p>
-        </div>
-      </div>
-    );
-  }
-
-  return children({ user, token, login, logout, loading });
+  return children({ user, token: null, login, logout, loading: false });
 };
 
-// Protected Route
-const ProtectedRoute = ({ children, user, token }) => {
-  const location = useLocation();
-  
-  if (!user || !token) {
-    return <Navigate to="/login" state={{ from: location }} replace />;
-  }
-  
-  return children;
-};
-
-// Auth Callback for Google OAuth — the backend redirects here with the JWT in
-// the URL fragment (#token=...). We swap it for the user profile and log in.
-const AuthCallback = ({ login }) => {
-  const location = useLocation();
-  const navigate = useNavigate();
-  const hasProcessed = useRef(false);
-
-  useEffect(() => {
-    if (hasProcessed.current) return;
-    hasProcessed.current = true;
-
-    const processToken = async () => {
-      const tokenMatch = location.hash.match(/token=([^&]+)/);
-
-      if (tokenMatch) {
-        const token = decodeURIComponent(tokenMatch[1]);
-        try {
-          const response = await axios.get("/api/auth/me", {
-            headers: { Authorization: `Bearer ${token}` }
-          });
-          login(response.data, token);
-          navigate("/dashboard", { replace: true });
-        } catch (error) {
-          console.error("Auth callback error:", error);
-          navigate("/login", { replace: true });
-        }
-      } else {
-        navigate("/login", { replace: true });
-      }
-    };
-
-    processToken();
-  }, [location, login, navigate]);
-
-  return (
-    <div className="min-h-screen flex items-center justify-center bg-slate-50">
-      <div className="text-center">
-        <div className="w-12 h-12 border-4 border-blue-600 border-t-transparent rounded-full spinner mx-auto mb-4"></div>
-        <p className="text-slate-600">Completing sign in...</p>
-      </div>
-    </div>
-  );
-};
+// Protected Route — auth is removed, so this just renders its children. Kept as
+// a thin wrapper so the route definitions below don't need to change.
+const ProtectedRoute = ({ children }) => children;
 
 // App Router
 function AppRouter({ user, token, login, logout }) {
-  const location = useLocation();
-
-  // Check for token in URL hash (Google OAuth callback)
-  if (location.hash?.includes('token=')) {
-    return <AuthCallback login={login} />;
-  }
-
   return (
     <Routes>
       <Route path="/" element={<LandingPage user={user} />} />
-      <Route path="/login" element={user ? <Navigate to="/dashboard" replace /> : <LoginPage login={login} />} />
-      <Route path="/register" element={user ? <Navigate to="/dashboard" replace /> : <RegisterPage login={login} />} />
-      
+      {/* Auth removed: old login/register links land straight in the app. */}
+      <Route path="/login" element={<Navigate to="/dashboard" replace />} />
+      <Route path="/register" element={<Navigate to="/dashboard" replace />} />
+
       <Route path="/dashboard" element={
         <ProtectedRoute user={user} token={token}>
           <Dashboard user={user} token={token} logout={logout} />

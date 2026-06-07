@@ -1,5 +1,6 @@
 from fastapi import FastAPI, APIRouter, HTTPException, Depends, Response, Request
-from fastapi.responses import StreamingResponse, RedirectResponse
+from fastapi.responses import StreamingResponse, RedirectResponse, FileResponse
+from fastapi.staticfiles import StaticFiles
 from dotenv import load_dotenv
 from urllib.parse import urlencode
 from starlette.middleware.cors import CORSMiddleware
@@ -330,45 +331,21 @@ def create_jwt_token(user_id: str, email: str) -> str:
     }
     return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
 
-async def get_current_user(request: Request) -> dict:
-    session_token = request.cookies.get("session_token")
+# Authentication has been removed: this is a single shared department workspace.
+# Every request acts as the same fixed user, so all sessions/subjects/faculty/
+# timetables are visible to anyone who opens the app. This intentionally matches
+# the app's single-admin design and removes login/signup entirely.
+SHARED_USER = {
+    "user_id": "shared",
+    "email": "department@local",
+    "name": "Department",
+    "auth_type": "none",
+    "picture": None,
+}
 
-    auth_header = request.headers.get("Authorization")
-    if auth_header and auth_header.startswith("Bearer "):
-        session_token = auth_header.split(" ")[1]
 
-    if not session_token:
-        raise HTTPException(status_code=401, detail="Not authenticated")
-
-    session = await db.user_sessions.find_one(
-        {"session_token": session_token},
-        {"_id": 0}
-    )
-
-    if session:
-        expires_at = session.get("expires_at")
-        if isinstance(expires_at, str):
-            expires_at = datetime.fromisoformat(expires_at)
-        if expires_at.tzinfo is None:
-            expires_at = expires_at.replace(tzinfo=timezone.utc)
-        if expires_at < datetime.now(timezone.utc):
-            raise HTTPException(status_code=401, detail="Session expired")
-
-        user = await db.users.find_one({"user_id": session["user_id"]}, {"_id": 0})
-        if user:
-            return user
-
-    try:
-        payload = jwt.decode(session_token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
-        user = await db.users.find_one({"user_id": payload["user_id"]}, {"_id": 0})
-        if user:
-            return user
-    except jwt.ExpiredSignatureError:
-        raise HTTPException(status_code=401, detail="Token expired")
-    except jwt.InvalidTokenError:
-        pass
-
-    raise HTTPException(status_code=401, detail="Invalid token")
+async def get_current_user() -> dict:
+    return SHARED_USER
 
 
 # ==================== AUTH ENDPOINTS ====================
@@ -1824,3 +1801,36 @@ else:
 @app.on_event("shutdown")
 async def shutdown_db_client():
     client.close()
+
+
+# ==================== SERVE REACT BUILD (single-origin) ====================
+# When a built frontend is present, FastAPI serves it directly so the whole app
+# lives at one URL — no CORS, no separate backend URL to configure. The /api
+# routes above always take precedence; everything else falls back to index.html
+# so client-side routing works.
+
+FRONTEND_BUILD = Path(
+    os.environ.get("FRONTEND_BUILD_DIR", str(ROOT_DIR.parent / "frontend" / "build"))
+)
+
+if FRONTEND_BUILD.is_dir():
+    app.mount(
+        "/static",
+        StaticFiles(directory=str(FRONTEND_BUILD / "static")),
+        name="static",
+    )
+
+    @app.get("/{full_path:path}")
+    async def serve_spa(full_path: str):
+        if full_path == "api" or full_path.startswith("api/"):
+            raise HTTPException(status_code=404, detail="Not found")
+        candidate = FRONTEND_BUILD / full_path
+        if full_path and candidate.is_file():
+            return FileResponse(str(candidate))
+        return FileResponse(str(FRONTEND_BUILD / "index.html"))
+else:
+    logger.warning(
+        "Frontend build not found at %s — serving API only. "
+        "Build the frontend (yarn build) for single-origin hosting.",
+        FRONTEND_BUILD,
+    )
