@@ -11,10 +11,9 @@ import RegisterPage from "@/pages/RegisterPage";
 import Dashboard from "@/pages/Dashboard";
 import SessionSetup from "@/pages/SessionSetup";
 import FacultyManagement from "@/pages/FacultyManagement";
-import RoomsManagement from "@/pages/RoomsManagement";
 import SectionsManagement from "@/pages/SectionsManagement";
 import SubjectsManagement from "@/pages/SubjectsManagement";
-import PriorityAllocation from "@/pages/PriorityAllocation";
+import FacultyChoices from "@/pages/FacultyChoices";
 import TimetableView from "@/pages/TimetableView";
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
@@ -91,27 +90,27 @@ const ProtectedRoute = ({ children, user, token }) => {
   return children;
 };
 
-// Auth Callback for Google OAuth
+// Auth Callback for Google OAuth — the backend redirects here with the JWT in
+// the URL fragment (#token=...). We swap it for the user profile and log in.
 const AuthCallback = ({ login }) => {
   const location = useLocation();
   const navigate = useNavigate();
   const hasProcessed = useRef(false);
 
   useEffect(() => {
-    // REMINDER: DO NOT HARDCODE THE URL, OR ADD ANY FALLBACKS OR REDIRECT URLS, THIS BREAKS THE AUTH
     if (hasProcessed.current) return;
     hasProcessed.current = true;
 
-    const processSession = async () => {
-      const hash = location.hash;
-      const sessionIdMatch = hash.match(/session_id=([^&]+)/);
-      
-      if (sessionIdMatch) {
-        const sessionId = sessionIdMatch[1];
+    const processToken = async () => {
+      const tokenMatch = location.hash.match(/token=([^&]+)/);
+
+      if (tokenMatch) {
+        const token = decodeURIComponent(tokenMatch[1]);
         try {
-          const response = await axios.get(`/api/auth/session?session_id=${sessionId}`);
-          const { session_token, ...userData } = response.data;
-          login(userData, session_token);
+          const response = await axios.get("/api/auth/me", {
+            headers: { Authorization: `Bearer ${token}` }
+          });
+          login(response.data, token);
           navigate("/dashboard", { replace: true });
         } catch (error) {
           console.error("Auth callback error:", error);
@@ -122,7 +121,7 @@ const AuthCallback = ({ login }) => {
       }
     };
 
-    processSession();
+    processToken();
   }, [location, login, navigate]);
 
   return (
@@ -139,8 +138,8 @@ const AuthCallback = ({ login }) => {
 function AppRouter({ user, token, login, logout }) {
   const location = useLocation();
 
-  // Check for session_id in URL hash (Google OAuth callback)
-  if (location.hash?.includes('session_id=')) {
+  // Check for token in URL hash (Google OAuth callback)
+  if (location.hash?.includes('token=')) {
     return <AuthCallback login={login} />;
   }
 
@@ -168,12 +167,6 @@ function AppRouter({ user, token, login, logout }) {
         </ProtectedRoute>
       } />
       
-      <Route path="/session/:sessionId/rooms" element={
-        <ProtectedRoute user={user} token={token}>
-          <RoomsManagement user={user} token={token} logout={logout} />
-        </ProtectedRoute>
-      } />
-      
       <Route path="/session/:sessionId/sections" element={
         <ProtectedRoute user={user} token={token}>
           <SectionsManagement user={user} token={token} logout={logout} />
@@ -186,9 +179,9 @@ function AppRouter({ user, token, login, logout }) {
         </ProtectedRoute>
       } />
       
-      <Route path="/session/:sessionId/priority" element={
+      <Route path="/session/:sessionId/faculty-choices" element={
         <ProtectedRoute user={user} token={token}>
-          <PriorityAllocation user={user} token={token} logout={logout} />
+          <FacultyChoices user={user} token={token} logout={logout} />
         </ProtectedRoute>
       } />
       

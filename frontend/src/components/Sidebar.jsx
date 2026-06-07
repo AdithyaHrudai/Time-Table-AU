@@ -1,7 +1,7 @@
 import { Link, useLocation, useParams } from "react-router-dom";
-import { 
-  Calendar, LayoutDashboard, Users, Building2, BookOpen, 
-  GraduationCap, Clock, Table2, LogOut, Settings, ChevronRight
+import {
+  Calendar, LayoutDashboard, Users, BookOpen,
+  GraduationCap, ListChecks, Table2, LogOut, Settings, ChevronRight
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -16,11 +16,10 @@ export const Sidebar = ({ user, logout, sessionName }) => {
 
   const sessionNavItems = sessionId ? [
     { icon: Settings, label: "Session Setup", path: `/session/${sessionId}/setup` },
-    { icon: Users, label: "Faculty", path: `/session/${sessionId}/faculty` },
-    { icon: Building2, label: "Rooms & Labs", path: `/session/${sessionId}/rooms` },
     { icon: GraduationCap, label: "Sections", path: `/session/${sessionId}/sections` },
     { icon: BookOpen, label: "Subjects", path: `/session/${sessionId}/subjects` },
-    { icon: Clock, label: "Priority Slots", path: `/session/${sessionId}/priority` },
+    { icon: Users, label: "Faculty", path: `/session/${sessionId}/faculty` },
+    { icon: ListChecks, label: "Faculty Choices", path: `/session/${sessionId}/faculty-choices` },
     { icon: Table2, label: "Timetable", path: `/session/${sessionId}/timetable` }
   ] : [];
 
@@ -28,7 +27,6 @@ export const Sidebar = ({ user, logout, sessionName }) => {
 
   return (
     <aside className="sidebar w-64 flex flex-col fixed left-0 top-0 bottom-0 z-40">
-      {/* Logo */}
       <div className="p-6 border-b border-white/10">
         <Link to="/dashboard" className="flex items-center gap-2">
           <Calendar className="w-8 h-8 text-blue-400" />
@@ -36,7 +34,6 @@ export const Sidebar = ({ user, logout, sessionName }) => {
         </Link>
       </div>
 
-      {/* Navigation */}
       <nav className="flex-1 p-4 space-y-2 overflow-y-auto">
         {mainNavItems.map((item) => (
           <Link
@@ -65,7 +62,7 @@ export const Sidebar = ({ user, logout, sessionName }) => {
                 key={item.path}
                 to={item.path}
                 className={cn("sidebar-link", isActive(item.path) && "active")}
-                data-testid={`nav-${item.label.toLowerCase().replace(' ', '-')}`}
+                data-testid={`nav-${item.label.toLowerCase().replace(/ /g, '-')}`}
               >
                 <item.icon className="w-5 h-5" />
                 <span>{item.label}</span>
@@ -75,7 +72,6 @@ export const Sidebar = ({ user, logout, sessionName }) => {
         )}
       </nav>
 
-      {/* User section */}
       <div className="p-4 border-t border-white/10">
         <div className="flex items-center gap-3 px-3 py-2 mb-2">
           {user?.picture ? (

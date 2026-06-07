@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import axios from "axios";
 import { Button } from "@/components/ui/button";
@@ -15,6 +15,15 @@ export default function LoginPage({ login }) {
     email: "",
     password: ""
   });
+
+  // Surface Google OAuth failures (backend redirects to /login?error=...)
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("error")) {
+      toast.error("Google sign-in failed. Please try again or use email/password.");
+      window.history.replaceState({}, "", "/login");
+    }
+  }, []);
 
   const handleChange = (e) => {
     setFormData(prev => ({ ...prev, [e.target.name]: e.target.value }));
@@ -37,9 +46,10 @@ export default function LoginPage({ login }) {
   };
 
   const handleGoogleLogin = () => {
-    // REMINDER: DO NOT HARDCODE THE URL, OR ADD ANY FALLBACKS OR REDIRECT URLS, THIS BREAKS THE AUTH
-    const redirectUrl = window.location.origin + '/dashboard';
-    window.location.href = `https://auth.emergentagent.com/?redirect=${encodeURIComponent(redirectUrl)}`;
+    // Standard Google OAuth 2.0 — the backend handles the consent flow and
+    // redirects back to /dashboard with a token in the URL fragment.
+    const backendUrl = axios.defaults.baseURL || "";
+    window.location.href = `${backendUrl}/api/auth/google/login`;
   };
 
   return (

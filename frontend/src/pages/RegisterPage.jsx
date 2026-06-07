@@ -54,9 +54,10 @@ export default function RegisterPage({ login }) {
   };
 
   const handleGoogleLogin = () => {
-    // REMINDER: DO NOT HARDCODE THE URL, OR ADD ANY FALLBACKS OR REDIRECT URLS, THIS BREAKS THE AUTH
-    const redirectUrl = window.location.origin + '/dashboard';
-    window.location.href = `https://auth.emergentagent.com/?redirect=${encodeURIComponent(redirectUrl)}`;
+    // Standard Google OAuth 2.0 — the backend handles the consent flow and
+    // redirects back to /dashboard with a token in the URL fragment.
+    const backendUrl = axios.defaults.baseURL || "";
+    window.location.href = `${backendUrl}/api/auth/google/login`;
   };
 
   return (

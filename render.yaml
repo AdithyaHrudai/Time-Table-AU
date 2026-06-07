@@ -1,0 +1,31 @@
+# Render Blueprint for the TimetableGenius backend (FastAPI).
+# In Render: New > Blueprint > connect this repo. Render reads this file.
+# Secrets (sync: false) must be filled in the Render dashboard after creation.
+services:
+  - type: web
+    name: timetablegenius-api
+    runtime: python
+    plan: free
+    rootDir: backend
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn server:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /api/health
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.11.9"
+      - key: MONGO_URL
+        sync: false          # paste your MongoDB Atlas connection string
+      - key: DB_NAME
+        value: timetable_genius
+      - key: JWT_SECRET
+        generateValue: true  # Render generates a strong random secret
+      - key: CORS_ORIGINS
+        sync: false          # e.g. https://your-app.vercel.app
+      - key: FRONTEND_URL
+        sync: false          # e.g. https://your-app.vercel.app
+      - key: GOOGLE_CLIENT_ID
+        sync: false
+      - key: GOOGLE_CLIENT_SECRET
+        sync: false
+      - key: GOOGLE_REDIRECT_URI
+        sync: false          # https://timetablegenius-api.onrender.com/api/auth/google/callback
