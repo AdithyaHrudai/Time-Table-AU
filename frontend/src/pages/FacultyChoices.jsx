@@ -178,7 +178,9 @@ export default function FacultyChoices({ user, token, logout }) {
                 ? sections.filter((s) => s.year === chosenSubject.year)
                 : [];
               const allowedRoles = chosenSubject
-                ? (chosenSubject.requires_lab ? ["theory", "lab"] : ["theory"])
+                ? (chosenSubject.is_lab_only
+                    ? ["lab"]
+                    : chosenSubject.requires_lab ? ["theory", "lab"] : ["theory"])
                 : ["theory", "lab"];
 
               // If faculty has a non-empty subject_ids whitelist, narrow the
@@ -253,7 +255,11 @@ export default function FacultyChoices({ user, token, logout }) {
                         <Label className="text-xs">Subject</Label>
                         <Select
                           value={pick.subject_id || ""}
-                          onValueChange={(v) => setPick(f.faculty_id, { subject_id: v, section_id: "", role: "" })}
+                          onValueChange={(v) => setPick(f.faculty_id, {
+                            subject_id: v, section_id: "",
+                            // Standalone labs only have a lab role — pre-select it.
+                            role: subjectById[v]?.is_lab_only ? "lab" : "",
+                          })}
                         >
                           <SelectTrigger data-testid={`pick-subject-${f.faculty_id}`}>
                             <SelectValue placeholder="Choose subject" />

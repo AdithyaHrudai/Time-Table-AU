@@ -79,27 +79,44 @@ export default function TimetableView({ user, token, logout }) {
     }
   };
 
+  const downloadPdf = async (type, filter, label) => {
+    let url = `/api/sessions/${sessionId}/export-pdf?view_type=${type}`;
+    if (filter) url += `&filter_id=${encodeURIComponent(filter)}`;
+
+    const response = await axios.get(url, {
+      headers: { Authorization: `Bearer ${token}` },
+      responseType: "blob"
+    });
+
+    const blob = new Blob([response.data], { type: "application/pdf" });
+    const downloadUrl = window.URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = downloadUrl;
+    link.download = `timetable_${session?.name?.replace(/\s+/g, "_") || "export"}_${label}.pdf`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    window.URL.revokeObjectURL(downloadUrl);
+  };
+
   const handleDownloadPDF = async () => {
     setDownloading(true);
     try {
-      let url = `/api/sessions/${sessionId}/export-pdf?view_type=${viewType}`;
-      if (filterId) url += `&filter_id=${encodeURIComponent(filterId)}`;
-
-      const response = await axios.get(url, {
-        headers: { Authorization: `Bearer ${token}` },
-        responseType: "blob"
-      });
-
-      const blob = new Blob([response.data], { type: "application/pdf" });
-      const downloadUrl = window.URL.createObjectURL(blob);
-      const link = document.createElement("a");
-      link.href = downloadUrl;
-      link.download = `timetable_${session?.name?.replace(/\s+/g, "_") || "export"}_${viewType}.pdf`;
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-      window.URL.revokeObjectURL(downloadUrl);
+      await downloadPdf(viewType, filterId, viewType);
       toast.success("PDF downloaded");
+    } catch (error) {
+      toast.error("Failed to download PDF");
+    } finally {
+      setDownloading(false);
+    }
+  };
+
+  // One PDF, one official template page per section — ready for the notice board.
+  const handleDownloadAllSections = async () => {
+    setDownloading(true);
+    try {
+      await downloadPdf("all_sections", null, "all_sections");
+      toast.success("All section timetables downloaded");
     } catch (error) {
       toast.error("Failed to download PDF");
     } finally {
@@ -154,6 +171,16 @@ export default function TimetableView({ user, token, logout }) {
             <Button variant="outline" onClick={handleRegenerate} disabled={regenerating} data-testid="regenerate-btn">
               <RefreshCw className={`w-4 h-4 mr-2 ${regenerating ? "spinner" : ""}`} />
               {regenerating ? "Generating..." : "Generate / Regenerate"}
+            </Button>
+            <Button
+              variant="outline"
+              className="border-emerald-300 text-emerald-700 hover:bg-emerald-50"
+              onClick={handleDownloadAllSections}
+              disabled={downloading || (timetable?.entries || []).length === 0}
+              data-testid="download-all-sections-btn"
+            >
+              <Download className="w-4 h-4 mr-2" />
+              All Sections PDF
             </Button>
             <Button
               className="bg-blue-600 hover:bg-blue-700 btn-primary"

@@ -21,8 +21,9 @@ from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4, landscape
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.units import inch
-from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
+from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, PageBreak, Flowable
 from reportlab.lib.enums import TA_CENTER
+from reportlab.pdfbase.pdfmetrics import stringWidth
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -60,6 +61,13 @@ logger = logging.getLogger(__name__)
 FIXED_WORKING_DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"]
 FIXED_TIME_SLOTS = ["09:00-10:40", "10:40-12:20", "13:30-15:10"]
 LUNCH_SLOT = "12:20-13:30"
+# Lunch sits between slot index 1 and 2 — a double-length lab cannot span it.
+LUNCH_AFTER_SLOT_INDEX = 1
+
+# Defaults for the official PDF header (all overridable per session).
+DEFAULT_DEPT_NAME = "DEPARTMENT OF COMPUTER SCIENCE AND SYSTEMS ENGINEERING"
+DEFAULT_COLLEGE_NAME = "ANDHRA UNIVERSITY, COLLEGE OF ENGINEERING, VISAKHAPATNAM"
+DEFAULT_MODE_OF_CLASS = "OFFLINE"
 
 DESIGNATIONS = ["senior_professor", "associate_professor", "assistant_professor", "adhoc", "research_scholar"]
 
@@ -160,6 +168,12 @@ class SessionConfigCreate(BaseModel):
     # Optional generation tuning — None means "leave unchanged / use default".
     generation_attempts: Optional[int] = None
     balance_faculty_load: Optional[bool] = None
+    # Optional PDF-header customization — None means "leave unchanged / use default".
+    dept_name: Optional[str] = None
+    college_name: Optional[str] = None
+    effective_from: Optional[str] = None   # e.g. "01-07-2025"
+    semester_label: Optional[str] = None   # e.g. "I-Semester"
+    mode_of_class: Optional[str] = None    # e.g. "OFFLINE"
 
 class SessionConfig(BaseModel):
     model_config = ConfigDict(extra="ignore")
@@ -176,6 +190,12 @@ class SessionConfig(BaseModel):
     # When on, auto-fill and slot placement actively spread the workload across
     # faculty and across the week instead of greedily packing the first fit.
     balance_faculty_load: bool = True
+    # PDF header customization (official department template).
+    dept_name: str = DEFAULT_DEPT_NAME
+    college_name: str = DEFAULT_COLLEGE_NAME
+    effective_from: Optional[str] = None
+    semester_label: Optional[str] = None
+    mode_of_class: str = DEFAULT_MODE_OF_CLASS
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
@@ -208,6 +228,11 @@ class Section(BaseModel):
     section_number: Optional[int] = None  # null for the single 4yr; 1..N for 6yr
     name: str
     strength: int = 60
+    room: Optional[str] = None  # e.g. "GFCL-1"; shown on the official PDF header
+
+
+class SectionRoomUpdate(BaseModel):
+    room: Optional[str] = None
 
 
 # ---- Faculty ----
@@ -242,11 +267,17 @@ class SubjectCreate(BaseModel):
     code: str
     year: int
     requires_lab: bool = False
+    # Standalone lab: a lab-credit course not attached to any theory subject
+    # (some semesters have these). Implies requires_lab=True and 0 lectures.
+    is_lab_only: bool = False
     # How many theory lectures per week this subject needs (credit-dependent).
     # Defaults to 2 to match the previous fixed behaviour.
     lectures_per_week: int = LECTURES_PER_THEORY_PER_WEEK
     # Lab sessions per batch per week (only used when requires_lab is on).
     lab_sessions_per_week: int = LAB_SESSIONS_PER_BATCH_PER_WEEK
+    # How many consecutive teaching slots one lab session occupies:
+    # 1 = 1h40m, 2 = 3h20m (a full morning block — cannot span lunch).
+    lab_duration_slots: int = 1
 
 class Subject(BaseModel):
     model_config = ConfigDict(extra="ignore")
@@ -256,8 +287,10 @@ class Subject(BaseModel):
     code: str
     year: int
     requires_lab: bool = False
+    is_lab_only: bool = False
     lectures_per_week: int = LECTURES_PER_THEORY_PER_WEEK
     lab_sessions_per_week: int = LAB_SESSIONS_PER_BATCH_PER_WEEK
+    lab_duration_slots: int = 1
 
 
 # ---- Faculty Choice (replaces priority allocation) ----
@@ -302,6 +335,9 @@ class TimetableEntry(BaseModel):
     section_stream: str
     batch: Optional[int] = None  # None for theory, 1 or 2 for lab
     is_lab: bool = False
+    # Entries belonging to one multi-slot lab session share a group id, so
+    # views/exports can merge them into a single block spanning both slots.
+    lab_group_id: Optional[str] = None
 
 class Timetable(BaseModel):
     model_config = ConfigDict(extra="ignore")
@@ -563,6 +599,11 @@ async def create_session(config: SessionConfigCreate, user: dict = Depends(get_c
         years=sorted(set(config.years)),
         generation_attempts=_clamp_attempts(config.generation_attempts, DEFAULT_GENERATION_ATTEMPTS),
         balance_faculty_load=config.balance_faculty_load if config.balance_faculty_load is not None else True,
+        dept_name=(config.dept_name or DEFAULT_DEPT_NAME).strip() or DEFAULT_DEPT_NAME,
+        college_name=(config.college_name or DEFAULT_COLLEGE_NAME).strip() or DEFAULT_COLLEGE_NAME,
+        effective_from=(config.effective_from or "").strip() or None,
+        semester_label=(config.semester_label or "").strip() or None,
+        mode_of_class=(config.mode_of_class or DEFAULT_MODE_OF_CLASS).strip() or DEFAULT_MODE_OF_CLASS,
     )
     doc = session.model_dump()
     doc["created_at"] = doc["created_at"].isoformat()
@@ -595,6 +636,16 @@ async def update_session(session_id: str, config: SessionConfigCreate, user: dic
         )
     if config.balance_faculty_load is not None:
         updates["balance_faculty_load"] = bool(config.balance_faculty_load)
+    if config.dept_name is not None:
+        updates["dept_name"] = config.dept_name.strip() or DEFAULT_DEPT_NAME
+    if config.college_name is not None:
+        updates["college_name"] = config.college_name.strip() or DEFAULT_COLLEGE_NAME
+    if config.effective_from is not None:
+        updates["effective_from"] = config.effective_from.strip() or None
+    if config.semester_label is not None:
+        updates["semester_label"] = config.semester_label.strip() or None
+    if config.mode_of_class is not None:
+        updates["mode_of_class"] = config.mode_of_class.strip() or DEFAULT_MODE_OF_CLASS
     result = await db.sessions.update_one(
         {"session_id": session_id, "user_id": user["user_id"]},
         {"$set": updates}
@@ -656,13 +707,15 @@ def _build_sections_for_year(session_id: str, yc: YearConfig) -> List[Section]:
 
 async def _regenerate_sections_for_year(session_id: str, yc: YearConfig):
     """Replace all sections of this (session, year) with freshly generated ones.
-    Cascades: deletes faculty_choices that referenced now-deleted sections."""
-    old_section_ids = [
-        s["section_id"]
-        for s in await db.sections.find(
-            {"session_id": session_id, "year": yc.year}, {"section_id": 1, "_id": 0}
-        ).to_list(1000)
-    ]
+    Cascades: deletes faculty_choices that referenced now-deleted sections.
+    Room assignments are carried over by section name so re-saving a year
+    config doesn't wipe them."""
+    old_sections = await db.sections.find(
+        {"session_id": session_id, "year": yc.year},
+        {"section_id": 1, "name": 1, "room": 1, "_id": 0},
+    ).to_list(1000)
+    old_section_ids = [s["section_id"] for s in old_sections]
+    rooms_by_name = {s["name"]: s.get("room") for s in old_sections if s.get("room")}
     await db.sections.delete_many({"session_id": session_id, "year": yc.year})
     if old_section_ids:
         await db.faculty_choices.delete_many({
@@ -671,6 +724,9 @@ async def _regenerate_sections_for_year(session_id: str, yc: YearConfig):
         })
 
     new_sections = _build_sections_for_year(session_id, yc)
+    for s in new_sections:
+        if s.name in rooms_by_name:
+            s.room = rooms_by_name[s.name]
     if new_sections:
         await db.sections.insert_many([s.model_dump() for s in new_sections])
 
@@ -756,6 +812,24 @@ async def get_sections(session_id: str, user: dict = Depends(get_current_user)):
     sections = await db.sections.find({"session_id": session_id}, {"_id": 0}).to_list(1000)
     sections.sort(key=lambda s: (s.get("year", 0), s.get("stream", ""), s.get("section_number") or 0))
     return sections
+
+
+@api_router.put("/sessions/{session_id}/sections/{section_id}/room", response_model=Section)
+async def update_section_room(
+    session_id: str, section_id: str, payload: SectionRoomUpdate,
+    user: dict = Depends(get_current_user),
+):
+    """Sections themselves are auto-managed, but the room number is a free
+    customization shown on the official PDF header."""
+    await _verify_session(session_id, user["user_id"])
+    room = (payload.room or "").strip() or None
+    result = await db.sections.update_one(
+        {"section_id": section_id, "session_id": session_id},
+        {"$set": {"room": room}},
+    )
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Section not found")
+    return await db.sections.find_one({"section_id": section_id}, {"_id": 0})
 
 
 # ==================== FACULTY ENDPOINTS ====================
@@ -871,13 +945,35 @@ async def delete_faculty(session_id: str, faculty_id: str, user: dict = Depends(
 
 # ==================== SUBJECT ENDPOINTS ====================
 
-def _validate_subject_counts(data: SubjectCreate):
+def _normalize_subject_payload(data: SubjectCreate) -> SubjectCreate:
+    """Coerce + validate a subject payload. A standalone lab ('Add Lab') is a
+    lab-credit course not attached to any theory subject: it always has a lab
+    and never has lectures."""
+    if data.is_lab_only:
+        data.requires_lab = True
+        data.lectures_per_week = 0
+        if data.lab_sessions_per_week < 1:
+            data.lab_sessions_per_week = 1
     if data.lectures_per_week < 0 or data.lectures_per_week > 6:
         raise HTTPException(status_code=400, detail="Lectures/week must be between 0 and 6")
     if data.lab_sessions_per_week < 0 or data.lab_sessions_per_week > 4:
         raise HTTPException(status_code=400, detail="Lab sessions/week must be between 0 and 4")
     if not data.requires_lab and data.lectures_per_week == 0:
         raise HTTPException(status_code=400, detail="A subject with no lab needs at least 1 lecture/week")
+    if data.requires_lab and data.lab_sessions_per_week == 0 and data.lectures_per_week == 0:
+        raise HTTPException(status_code=400, detail="Subject has neither lectures nor lab sessions")
+    if data.lab_duration_slots not in (1, 2):
+        raise HTTPException(status_code=400, detail="Lab duration must be 1 slot (1h40m) or 2 slots (3h20m)")
+    return data
+
+
+async def _check_duplicate_subject_code(session_id: str, code: str, year: int, exclude_id: Optional[str] = None):
+    query = {"session_id": session_id, "year": year, "code": code}
+    if exclude_id:
+        query["subject_id"] = {"$ne": exclude_id}
+    existing = await db.subjects.find_one(query, {"_id": 0, "subject_id": 1})
+    if existing:
+        raise HTTPException(status_code=400, detail=f"A year-{year} subject with code {code!r} already exists")
 
 
 @api_router.post("/sessions/{session_id}/subjects", response_model=Subject)
@@ -885,7 +981,8 @@ async def create_subject(session_id: str, subject_data: SubjectCreate, user: dic
     session = await _verify_session(session_id, user["user_id"])
     if subject_data.year not in session.get("years", []):
         raise HTTPException(status_code=400, detail="Subject year not in selected session years")
-    _validate_subject_counts(subject_data)
+    subject_data = _normalize_subject_payload(subject_data)
+    await _check_duplicate_subject_code(session_id, subject_data.code, subject_data.year)
     subject = Subject(session_id=session_id, **subject_data.model_dump())
     await db.subjects.insert_one(subject.model_dump())
     return subject
@@ -902,13 +999,35 @@ async def update_subject(session_id: str, subject_id: str, subject_data: Subject
     session = await _verify_session(session_id, user["user_id"])
     if subject_data.year not in session.get("years", []):
         raise HTTPException(status_code=400, detail="Subject year not in selected session years")
-    _validate_subject_counts(subject_data)
-    result = await db.subjects.update_one(
+    subject_data = _normalize_subject_payload(subject_data)
+    await _check_duplicate_subject_code(session_id, subject_data.code, subject_data.year, exclude_id=subject_id)
+    old = await db.subjects.find_one({"subject_id": subject_id, "session_id": session_id}, {"_id": 0})
+    if not old:
+        raise HTTPException(status_code=404, detail="Subject not found")
+    await db.subjects.update_one(
         {"subject_id": subject_id, "session_id": session_id},
         {"$set": subject_data.model_dump()}
     )
-    if result.matched_count == 0:
-        raise HTTPException(status_code=404, detail="Subject not found")
+    # Cascade-clean faculty choices that the edit made invalid: lab choices for
+    # a subject that no longer has a lab, and choices pointing at sections of
+    # the old year after the subject moved to another year.
+    if old.get("requires_lab") and not subject_data.requires_lab:
+        await db.faculty_choices.delete_many(
+            {"session_id": session_id, "subject_id": subject_id, "role": "lab"}
+        )
+    if old.get("year") != subject_data.year:
+        valid_section_ids = [
+            s["section_id"]
+            for s in await db.sections.find(
+                {"session_id": session_id, "year": subject_data.year},
+                {"section_id": 1, "_id": 0},
+            ).to_list(1000)
+        ]
+        await db.faculty_choices.delete_many({
+            "session_id": session_id,
+            "subject_id": subject_id,
+            "section_id": {"$nin": valid_section_ids},
+        })
     subject = await db.subjects.find_one({"subject_id": subject_id}, {"_id": 0})
     return subject
 
@@ -937,6 +1056,8 @@ async def create_faculty_choice(session_id: str, payload: FacultyChoiceCreate, u
         raise HTTPException(status_code=400, detail="Subject year and section year mismatch")
     if payload.role == "lab" and not subject.get("requires_lab"):
         raise HTTPException(status_code=400, detail="This subject has no lab")
+    if payload.role == "theory" and subject.get("is_lab_only"):
+        raise HTTPException(status_code=400, detail="This is a standalone lab — it has no theory sessions")
 
     days = session.get("working_days", FIXED_WORKING_DAYS)
     slots = session.get("time_slots", FIXED_TIME_SLOTS)
@@ -1024,6 +1145,7 @@ def _build_demand(subjects: List[dict], sections: List[dict]) -> List[dict]:
                     "batch": None,
                 })
             if subj.get("requires_lab"):
+                duration = 2 if int(subj.get("lab_duration_slots", 1) or 1) >= 2 else 1
                 for batch in range(1, BATCHES_PER_SECTION + 1):
                     for _ in range(max(0, n_lab)):
                         demand.append({
@@ -1031,6 +1153,7 @@ def _build_demand(subjects: List[dict], sections: List[dict]) -> List[dict]:
                             "section_id": sec["section_id"],
                             "role": "lab",
                             "batch": batch,
+                            "duration": duration,
                         })
     return demand
 
@@ -1249,6 +1372,8 @@ def _generate_core(
     for b in (0, 1, 2):
         bucket = [i for i in instances if _bucket(i) == b]
         rng.shuffle(bucket)
+        # Double-length labs have far fewer legal slots — place them first.
+        bucket.sort(key=lambda i: -int(i.get("duration", 1)))
         if b == 0:
             ordered_pinned = bucket
         elif b == 1:
@@ -1271,12 +1396,20 @@ def _generate_core(
     fac_day_count: Dict[Tuple[str, str], int] = {}
     sec_day_count: Dict[Tuple[str, str], int] = {}
 
+    # Slot indices a 2-slot lab may start at: the next slot must exist and the
+    # pair must not straddle lunch (lunch sits after LUNCH_AFTER_SLOT_INDEX).
+    slot_index = {s: i for i, s in enumerate(slots)}
+    double_starts = {
+        slots[i] for i in range(len(slots) - 1) if i != LUNCH_AFTER_SLOT_INDEX
+    }
+
     failed: List[dict] = []
     for inst in instances:
         faculty = fac_map[inst["faculty_id"]]
         subject = sub_map[inst["subject_id"]]
         section = sec_map[inst["section_id"]]
         is_lab = (inst["role"] == "lab")
+        duration = int(inst.get("duration", 1) or 1)
         fac_id = faculty["faculty_id"]
         sec_id = section["section_id"]
 
@@ -1308,41 +1441,53 @@ def _generate_core(
         if bad_days:
             pairs = [p for p in pairs if p[0] not in bad_days]
 
+        # A double-length lab can only start where a contiguous second slot
+        # exists on the same side of lunch.
+        if duration == 2:
+            pairs = [p for p in pairs if p[1] in double_starts]
+
         placed = False
         for day, slot in pairs:
-            err = board.can_place(
-                faculty_id=fac_id,
-                section_id=sec_id,
-                batch=inst.get("batch"),
-                is_lab=is_lab,
-                day=day, slot=slot,
-            )
-            if err is not None:
+            covered = [slot]
+            if duration == 2:
+                covered.append(slots[slot_index[slot] + 1])
+            if any(
+                board.can_place(
+                    faculty_id=fac_id, section_id=sec_id, batch=inst.get("batch"),
+                    is_lab=is_lab, day=day, slot=s,
+                ) is not None
+                for s in covered
+            ):
                 continue
-            entry = TimetableEntry(
-                day=day, time_slot=slot,
-                faculty_id=fac_id, faculty_name=faculty["name"],
-                subject_id=subject["subject_id"], subject_name=subject["name"],
-                subject_code=subject["code"],
-                section_id=sec_id, section_name=section["name"],
-                section_year=section["year"], section_stream=section["stream"],
-                batch=inst.get("batch"),
-                is_lab=is_lab,
-            )
-            board.place(
-                faculty_id=fac_id,
-                section_id=sec_id,
-                batch=inst.get("batch"),
-                is_lab=is_lab, day=day, slot=slot, entry_id=entry.entry_id,
-            )
-            entries.append(entry)
-            fac_day_count[(fac_id, day)] = fac_day_count.get((fac_id, day), 0) + 1
-            sec_day_count[(sec_id, day)] = sec_day_count.get((sec_id, day), 0) + 1
+            group_id = f"grp_{uuid.uuid4().hex[:12]}" if duration == 2 else None
+            for s in covered:
+                entry = TimetableEntry(
+                    day=day, time_slot=s,
+                    faculty_id=fac_id, faculty_name=faculty["name"],
+                    subject_id=subject["subject_id"], subject_name=subject["name"],
+                    subject_code=subject["code"],
+                    section_id=sec_id, section_name=section["name"],
+                    section_year=section["year"], section_stream=section["stream"],
+                    batch=inst.get("batch"),
+                    is_lab=is_lab,
+                    lab_group_id=group_id,
+                )
+                board.place(
+                    faculty_id=fac_id,
+                    section_id=sec_id,
+                    batch=inst.get("batch"),
+                    is_lab=is_lab, day=day, slot=s, entry_id=entry.entry_id,
+                )
+                entries.append(entry)
+            fac_day_count[(fac_id, day)] = fac_day_count.get((fac_id, day), 0) + duration
+            sec_day_count[(sec_id, day)] = sec_day_count.get((sec_id, day), 0) + duration
             placed = True
             break
 
         if not placed:
             reason = "no free slot satisfies faculty + section + batch constraints"
+            if duration == 2:
+                reason = "no contiguous double slot (lab needs 2 back-to-back periods on one side of lunch)"
             if bad_days:
                 reason += " (faculty has limited availability)"
             failed.append({
@@ -1475,7 +1620,9 @@ def _compute_feasibility(
                 lab_assignments += 1
                 # The same faculty teaches both batches of a lab, so the two
                 # batch sessions can't run in parallel — each needs its own cell.
-                lab_cells = BATCHES_PER_SECTION * n_lab
+                # Double-length labs occupy 2 grid cells per session.
+                duration = 2 if int(subj.get("lab_duration_slots", 1) or 1) >= 2 else 1
+                lab_cells = BATCHES_PER_SECTION * n_lab * duration
                 total_lab_cells += lab_cells
                 cells += lab_cells
             per_section_cells[sec["section_id"]] = per_section_cells.get(sec["section_id"], 0) + cells
@@ -1556,6 +1703,261 @@ async def get_timetable(session_id: str, user: dict = Depends(get_current_user))
 
 # ==================== PDF EXPORT ====================
 
+# ---- Official department template (per-section pages) ----
+
+def _slot_to_minutes(t: str) -> int:
+    hh, mm = t.split(":")
+    return int(hh) * 60 + int(mm)
+
+
+def _fmt_ampm(minutes: int) -> str:
+    h, m = divmod(minutes, 60)
+    suffix = "AM" if h < 12 else "PM"
+    h12 = h % 12 or 12
+    return f"{h12:02d}:{m:02d}{suffix}"
+
+
+def _split_slot_halves(slot: str) -> List[str]:
+    """Split one 1h40m teaching slot into the two 50-minute period labels the
+    official template uses (e.g. '09:00-10:40' → '09:00AM-09:50AM', '09:50AM-10:40AM')."""
+    start_s, end_s = slot.split("-")
+    start, end = _slot_to_minutes(start_s), _slot_to_minutes(end_s)
+    mid = start + (end - start) // 2
+    return [f"{_fmt_ampm(start)}-{_fmt_ampm(mid)}", f"{_fmt_ampm(mid)}-{_fmt_ampm(end)}"]
+
+
+class _VerticalText(Flowable):
+    """Bottom-to-top rotated text, used for the LUNCH BREAK column."""
+
+    def __init__(self, text: str, font: str = "Helvetica-Bold", size: float = 7.5):
+        Flowable.__init__(self)
+        self.text = text
+        self.font = font
+        self.size = size
+        self._text_w = stringWidth(text, font, size)
+
+    def wrap(self, availWidth, availHeight):
+        return (self.size + 2, self._text_w)
+
+    def draw(self):
+        c = self.canv
+        c.saveState()
+        c.setFont(self.font, self.size)
+        c.rotate(90)
+        c.drawString(0, -self.size + 1, self.text)
+        c.restoreState()
+
+
+def _template_cell_text(cell_entries: List[dict]) -> str:
+    """What goes inside one grid cell on the official template: the subject
+    code, with a LAB-B{n} tag for lab batches."""
+    parts = []
+    for e in sorted(cell_entries, key=lambda x: (x.get("batch") or 0, x.get("subject_code", ""))):
+        code = e.get("subject_code", "")
+        if e.get("is_lab"):
+            b = e.get("batch")
+            parts.append(f"{code} LAB-B{b}" if b else f"{code} LAB")
+        else:
+            parts.append(code)
+    return " / ".join(parts)
+
+
+def _build_section_template_page(
+    session: dict,
+    section: dict,
+    entries: List[dict],
+    year_subjects: List[dict],
+    styles,
+) -> List[Any]:
+    """One page in the official department layout (timetable_template.png):
+    header rows, an AM/PM period grid with merged class blocks and a vertical
+    LUNCH BREAK column, then the subject → faculty legend with HOD column."""
+    days = session.get("working_days", FIXED_WORKING_DAYS)
+    slots = session.get("time_slots", FIXED_TIME_SLOTS)
+    sec_entries = [e for e in entries if e["section_id"] == section["section_id"]]
+
+    # ---- column layout: TIME/DAY + 2 halves per slot + lunch column ----
+    # columns[i] = ("time",) | ("half", slot_idx, half_idx, label) | ("lunch",)
+    columns: List[Tuple] = [("time",)]
+    for i, slot in enumerate(slots):
+        for j, label in enumerate(_split_slot_halves(slot)):
+            columns.append(("half", i, j, label))
+        if i == LUNCH_AFTER_SLOT_INDEX:
+            columns.append(("lunch",))
+    ncols = len(columns)
+    lunch_col = next(ci for ci, c in enumerate(columns) if c[0] == "lunch")
+    slot_start_col = {  # slot index → first of its two columns
+        c[1]: ci for ci, c in reversed(list(enumerate(columns))) if c[0] == "half" and c[2] == 0
+    }
+
+    wef = (session.get("effective_from") or "").strip()
+    title3 = f"TENTATIVE TIME TABLE WITH EFFECT FROM: W.E.F. {wef}" if wef else "TENTATIVE TIME TABLE"
+    semester = (session.get("semester_label") or "").strip()
+    class_label = section["name"] + (f", {semester}" if semester else "")
+    room = (section.get("room") or "").strip()
+    mode = (session.get("mode_of_class") or DEFAULT_MODE_OF_CLASS).strip()
+
+    cs = ParagraphStyle("tplCell", parent=styles["Normal"], fontSize=7.5,
+                        alignment=TA_CENTER, leading=9)
+
+    data: List[List[Any]] = []
+    span_cmds: List[Tuple] = []
+
+    def full_row(text, row_idx):
+        data.append([text] + [""] * (ncols - 1))
+        span_cmds.append(('SPAN', (0, row_idx), (-1, row_idx)))
+
+    full_row(session.get("dept_name") or DEFAULT_DEPT_NAME, 0)
+    full_row(session.get("college_name") or DEFAULT_COLLEGE_NAME, 1)
+    full_row(title3, 2)
+
+    # CLASS / Mode / Room row — three blocks across the full width, with the
+    # CLASS block taking half (it holds the longest text).
+    info_row = [""] * ncols
+    b1 = max(2, ncols // 2)              # CLASS: cols 0 .. b1-1
+    b2 = b1 + max(1, (ncols - b1) // 2)  # Mode:  cols b1 .. b2-1; Room: rest
+    info_row[0] = f"CLASS: {class_label}"
+    info_row[b1] = f"Mode of Class: {mode}"
+    info_row[b2] = f"ROOM NO: {room}" if room else "ROOM NO: ______"
+    data.append(info_row)
+    span_cmds.append(('SPAN', (0, 3), (b1 - 1, 3)))
+    span_cmds.append(('SPAN', (b1, 3), (b2 - 1, 3)))
+    span_cmds.append(('SPAN', (b2, 3), (-1, 3)))
+
+    # Period header row.
+    header_row: List[Any] = []
+    for c in columns:
+        if c[0] == "time":
+            header_row.append("TIME →\nDAY ↓")
+        elif c[0] == "half":
+            header_row.append(c[3].replace("-", "-\n"))
+        else:
+            header_row.append(_VerticalText("LUNCH BREAK"))
+    data.append(header_row)
+    header_row_idx = 4
+    first_day_row = 5
+
+    # The vertical LUNCH BREAK spans the header row + all day rows.
+    span_cmds.append(('SPAN', (lunch_col, header_row_idx), (lunch_col, first_day_row + len(days) - 1)))
+
+    # Day rows with merged class blocks.
+    for di, day in enumerate(days):
+        row: List[Any] = [""] * ncols
+        row[0] = day[:3].upper()
+        r = first_day_row + di
+        per_slot_entries = [
+            [e for e in sec_entries if e["day"] == day and e["time_slot"] == s]
+            for s in slots
+        ]
+        si = 0
+        while si < len(slots):
+            cell = per_slot_entries[si]
+            start_col = slot_start_col[si]
+            end_col = start_col + 1
+            # Merge with the next slot when it holds the same multi-slot lab
+            # group(s) and sits on the same side of lunch.
+            if si + 1 < len(slots) and si != LUNCH_AFTER_SLOT_INDEX and cell:
+                groups_here = {e.get("lab_group_id") for e in cell}
+                groups_next = {e.get("lab_group_id") for e in per_slot_entries[si + 1]}
+                if None not in groups_here and groups_here and groups_here == groups_next:
+                    end_col = slot_start_col[si + 1] + 1
+                    si += 1
+            text = _template_cell_text(cell)
+            row[start_col] = Paragraph(text, cs) if text else ""
+            if end_col > start_col:
+                span_cmds.append(('SPAN', (start_col, r), (end_col, r)))
+            si += 1
+        data.append(row)
+
+    # ---- column widths (portrait A4, ~7.4in usable) ----
+    usable = 7.4 * inch
+    time_w, lunch_w = 0.55 * inch, 0.26 * inch
+    half_w = (usable - time_w - lunch_w) / (ncols - 2)
+    col_widths = []
+    for c in columns:
+        col_widths.append(time_w if c[0] == "time" else (lunch_w if c[0] == "lunch" else half_w))
+
+    grid = Table(data, colWidths=col_widths,
+                 rowHeights=[None] * first_day_row + [0.34 * inch] * len(days))
+    grid_style = [
+        ('GRID', (0, 0), (-1, -1), 0.7, colors.black),
+        ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+        ('FONTSIZE', (0, 0), (-1, 0), 11),
+        ('FONTNAME', (0, 1), (-1, 1), 'Helvetica-Oblique'),
+        ('FONTSIZE', (0, 1), (-1, 1), 9.5),
+        ('FONTNAME', (0, 2), (-1, 2), 'Helvetica-Bold'),
+        ('FONTSIZE', (0, 2), (-1, 2), 8.5),
+        ('FONTNAME', (0, 3), (-1, 3), 'Helvetica-Bold'),
+        ('FONTSIZE', (0, 3), (-1, 3), 8),
+        ('FONTNAME', (0, header_row_idx), (-1, header_row_idx), 'Helvetica-Bold'),
+        ('FONTSIZE', (0, header_row_idx), (-1, header_row_idx), 6.5),
+        ('FONTNAME', (0, first_day_row), (0, -1), 'Helvetica-Bold'),
+        ('FONTSIZE', (0, first_day_row), (-1, -1), 7.5),
+        ('TOPPADDING', (0, 0), (-1, -1), 3),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 3),
+        ('LEFTPADDING', (0, 0), (-1, -1), 2),
+        ('RIGHTPADDING', (0, 0), (-1, -1), 2),
+    ] + span_cmds
+    grid.setStyle(TableStyle(grid_style))
+
+    elements: List[Any] = [grid, Spacer(1, 10)]
+
+    # ---- legend: subject → faculty, with HOD signature column ----
+    theory_fac: Dict[str, set] = {}
+    lab_fac: Dict[str, set] = {}
+    for e in sec_entries:
+        target = lab_fac if e.get("is_lab") else theory_fac
+        target.setdefault(e["subject_id"], set()).add(e.get("faculty_name", ""))
+
+    legend_cell = ParagraphStyle("tplLegend", parent=styles["Normal"], fontSize=7.5, leading=9)
+    legend_rows: List[List[Any]] = [["CODE", "SUBJECT NAME", "FACULTY NAME", ""]]
+    subjects_sorted = sorted(year_subjects, key=lambda s: s.get("code", ""))
+    for subj in subjects_sorted:
+        sid = subj["subject_id"]
+        names = sorted(theory_fac.get(sid, set()))
+        lab_names = sorted(lab_fac.get(sid, set()))
+        if subj.get("is_lab_only"):
+            fac_text = ", ".join(lab_names) or "—"
+            subj_name = f"{subj['name']} (LAB)"
+        else:
+            fac_text = ", ".join(names) or "—"
+            if lab_names and lab_names != names:
+                fac_text += f" | Lab: {', '.join(lab_names)}"
+            subj_name = subj["name"]
+        legend_rows.append([
+            subj.get("code", ""),
+            Paragraph(subj_name, legend_cell),
+            Paragraph(fac_text, legend_cell),
+            "",
+        ])
+
+    if len(legend_rows) > 1:
+        legend_rows[1][3] = "HEAD OF THE\nDEPARTMENT"
+        legend = Table(
+            legend_rows,
+            colWidths=[0.8 * inch, 2.7 * inch, 2.6 * inch, 1.3 * inch],
+        )
+        legend.setStyle(TableStyle([
+            ('GRID', (0, 0), (2, -1), 0.7, colors.black),
+            ('BOX', (3, 0), (3, -1), 0.7, colors.black),
+            ('SPAN', (3, 1), (3, -1)),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, 0), 8),
+            ('FONTSIZE', (0, 1), (-1, -1), 7.5),
+            ('FONTNAME', (3, 1), (3, -1), 'Helvetica-Bold'),
+            ('ALIGN', (0, 0), (0, -1), 'CENTER'),
+            ('ALIGN', (3, 0), (3, -1), 'CENTER'),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ('TOPPADDING', (0, 0), (-1, -1), 3),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 3),
+        ]))
+        elements.append(legend)
+
+    return elements
+
+
 def _cell_text_for_entry(e: dict, view_type: str = "master") -> str:
     code = e.get("subject_code", "")
     name = e.get("subject_name", "")
@@ -1573,7 +1975,7 @@ def _cell_text_for_entry(e: dict, view_type: str = "master") -> str:
 @api_router.get("/sessions/{session_id}/export-pdf")
 async def export_pdf(
     session_id: str,
-    view_type: str = "master",          # master | faculty | section | year
+    view_type: str = "master",          # master | faculty | section | year | all_sections
     filter_id: Optional[str] = None,    # faculty_id, section_id, or year (as str) depending on view_type
     user: dict = Depends(get_current_user)
 ):
@@ -1583,17 +1985,62 @@ async def export_pdf(
         raise HTTPException(status_code=404, detail="No timetable generated")
 
     entries = timetable.get("entries", [])
+
+    if view_type in ("faculty", "section", "year") and not filter_id:
+        raise HTTPException(status_code=400, detail=f"filter_id is required for the {view_type} view")
+
+    # Section exports use the official department template — one page per
+    # section, in the exact layout of the physical notice-board timetable.
+    if view_type in ("section", "all_sections"):
+        if view_type == "section":
+            sec = await db.sections.find_one(
+                {"section_id": filter_id, "session_id": session_id}, {"_id": 0}
+            )
+            if not sec:
+                raise HTTPException(status_code=404, detail="Section not found")
+            target_sections = [sec]
+        else:
+            target_sections = await db.sections.find({"session_id": session_id}, {"_id": 0}).to_list(1000)
+            target_sections.sort(
+                key=lambda s: (s.get("year", 0), s.get("stream", ""), s.get("section_number") or 0)
+            )
+            if not target_sections:
+                raise HTTPException(status_code=404, detail="No sections configured")
+
+        all_subjects = await db.subjects.find({"session_id": session_id}, {"_id": 0}).to_list(1000)
+        styles = getSampleStyleSheet()
+        buffer = BytesIO()
+        doc = SimpleDocTemplate(
+            buffer, pagesize=A4,
+            rightMargin=0.45 * inch, leftMargin=0.45 * inch,
+            topMargin=0.5 * inch, bottomMargin=0.5 * inch,
+        )
+        elements: List[Any] = []
+        for idx, sec in enumerate(target_sections):
+            if idx:
+                elements.append(PageBreak())
+            year_subjects = [s for s in all_subjects if s.get("year") == sec.get("year")]
+            elements.extend(
+                _build_section_template_page(session, sec, entries, year_subjects, styles)
+            )
+        doc.build(elements)
+        buffer.seek(0)
+        safe_name = session['name'].replace(' ', '_')
+        suffix = target_sections[0]['name'].replace(' ', '_').replace('/', '-') if view_type == "section" else "all_sections"
+        filename = f"timetable_{safe_name}_{suffix}.pdf"
+        return StreamingResponse(
+            buffer,
+            media_type="application/pdf",
+            headers={"Content-Disposition": f"attachment; filename={filename}"}
+        )
+
     title = f"Master Timetable - {session['name']}"
 
-    if view_type == "faculty" and filter_id:
+    if view_type == "faculty":
         entries = [e for e in entries if e["faculty_id"] == filter_id]
         f = await db.faculty.find_one({"faculty_id": filter_id, "session_id": session_id}, {"_id": 0})
         title = f"Faculty Timetable - {f['name'] if f else 'Faculty'}"
-    elif view_type == "section" and filter_id:
-        entries = [e for e in entries if e["section_id"] == filter_id]
-        s = await db.sections.find_one({"section_id": filter_id, "session_id": session_id}, {"_id": 0})
-        title = f"Section Timetable - {s['name'] if s else 'Section'}"
-    elif view_type == "year" and filter_id:
+    elif view_type == "year":
         try:
             yr = int(filter_id)
         except ValueError:
@@ -1668,60 +2115,6 @@ async def export_pdf(
 
     table.setStyle(style)
     elements.append(table)
-
-    # Section-view legend: subject code + name + theory/lab faculty.
-    if view_type == "section":
-        by_subj: Dict[str, Dict[str, Any]] = {}
-        for e in entries:
-            sid = e.get("subject_id")
-            if not sid:
-                continue
-            slot = by_subj.setdefault(sid, {
-                "code": e.get("subject_code", ""),
-                "name": e.get("subject_name", ""),
-                "theory": set(),
-                "lab": set(),
-            })
-            if e.get("is_lab"):
-                slot["lab"].add(e.get("faculty_name", ""))
-            else:
-                slot["theory"].add(e.get("faculty_name", ""))
-
-        if by_subj:
-            elements.append(Spacer(1, 16))
-            legend_title = ParagraphStyle(
-                'LegendTitle', parent=styles['Heading2'],
-                fontSize=11, alignment=TA_CENTER, spaceAfter=6,
-            )
-            elements.append(Paragraph("Subject → Faculty", legend_title))
-
-            legend_rows: List[List[str]] = [["Code", "Subject", "Theory Faculty", "Lab Faculty"]]
-            for sid, info in sorted(by_subj.items(), key=lambda kv: kv[1]["code"]):
-                legend_rows.append([
-                    info["code"],
-                    info["name"],
-                    ", ".join(sorted(info["theory"])) if info["theory"] else "—",
-                    ", ".join(sorted(info["lab"])) if info["lab"] else "—",
-                ])
-            legend_table = Table(
-                legend_rows,
-                colWidths=[0.9 * inch, 2.6 * inch, 3.0 * inch, 3.0 * inch],
-            )
-            legend_table.setStyle(TableStyle([
-                ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#0f172a')),
-                ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
-                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-                ('FONTSIZE', (0, 0), (-1, 0), 9),
-                ('FONTSIZE', (0, 1), (-1, -1), 8),
-                ('GRID', (0, 0), (-1, -1), 0.4, colors.HexColor('#94a3b8')),
-                ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-                ('ALIGN', (0, 0), (0, -1), 'CENTER'),
-                ('LEFTPADDING', (0, 0), (-1, -1), 5),
-                ('RIGHTPADDING', (0, 0), (-1, -1), 5),
-                ('TOPPADDING', (0, 0), (-1, -1), 4),
-                ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
-            ]))
-            elements.append(legend_table)
 
     footer_style = ParagraphStyle(
         'Footer', parent=styles['Normal'],

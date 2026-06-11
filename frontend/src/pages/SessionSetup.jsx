@@ -31,6 +31,10 @@ export default function SessionSetup({ user, token, logout }) {
   const [years, setYears] = useState([]);
   // year -> {year, sections_4yr, sections_6yr, strength_per_section}
   const [yearCfgs, setYearCfgs] = useState({});
+  // Optional PDF-header customization (official section timetable export).
+  const [pdfHeader, setPdfHeader] = useState({
+    dept_name: "", college_name: "", effective_from: "", semester_label: "", mode_of_class: "",
+  });
 
   useEffect(() => {
     bootstrap();
@@ -46,6 +50,13 @@ export default function SessionSetup({ user, token, logout }) {
       setSession(sessRes.data);
       setSessionName(sessRes.data.name);
       setYears(sessRes.data.years || []);
+      setPdfHeader({
+        dept_name: sessRes.data.dept_name || "",
+        college_name: sessRes.data.college_name || "",
+        effective_from: sessRes.data.effective_from || "",
+        semester_label: sessRes.data.semester_label || "",
+        mode_of_class: sessRes.data.mode_of_class || "",
+      });
 
       const ycMap = {};
       (ycRes.data || []).forEach((y) => { ycMap[y.year] = y; });
@@ -102,7 +113,15 @@ export default function SessionSetup({ user, token, logout }) {
     if (!validate()) return false;
     setSaving(true);
     try {
-      await axios.put(`/api/sessions/${sessionId}`, { name: sessionName, years }, {
+      await axios.put(`/api/sessions/${sessionId}`, {
+        name: sessionName,
+        years,
+        dept_name: pdfHeader.dept_name,
+        college_name: pdfHeader.college_name,
+        effective_from: pdfHeader.effective_from,
+        semester_label: pdfHeader.semester_label,
+        mode_of_class: pdfHeader.mode_of_class,
+      }, {
         headers: { Authorization: `Bearer ${token}` }
       });
       for (const y of years) {
@@ -242,6 +261,69 @@ export default function SessionSetup({ user, token, logout }) {
                 </Card>
               );
             })}
+
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-lg">PDF Header (optional)</CardTitle>
+                <CardDescription>
+                  Shown at the top of the official per-section timetable PDFs. Leave blank to use the department defaults.
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="space-y-2 md:col-span-2">
+                    <Label htmlFor="deptName">Department line</Label>
+                    <Input
+                      id="deptName"
+                      value={pdfHeader.dept_name}
+                      onChange={(e) => setPdfHeader((p) => ({ ...p, dept_name: e.target.value }))}
+                      placeholder="DEPARTMENT OF COMPUTER SCIENCE AND SYSTEMS ENGINEERING"
+                      data-testid="pdf-dept-input"
+                    />
+                  </div>
+                  <div className="space-y-2 md:col-span-2">
+                    <Label htmlFor="collegeName">College line</Label>
+                    <Input
+                      id="collegeName"
+                      value={pdfHeader.college_name}
+                      onChange={(e) => setPdfHeader((p) => ({ ...p, college_name: e.target.value }))}
+                      placeholder="ANDHRA UNIVERSITY, COLLEGE OF ENGINEERING, VISAKHAPATNAM"
+                      data-testid="pdf-college-input"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="wef">With effect from (W.E.F.)</Label>
+                    <Input
+                      id="wef"
+                      value={pdfHeader.effective_from}
+                      onChange={(e) => setPdfHeader((p) => ({ ...p, effective_from: e.target.value }))}
+                      placeholder="01-07-2025"
+                      data-testid="pdf-wef-input"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="semLabel">Semester label</Label>
+                    <Input
+                      id="semLabel"
+                      value={pdfHeader.semester_label}
+                      onChange={(e) => setPdfHeader((p) => ({ ...p, semester_label: e.target.value }))}
+                      placeholder="I-Semester"
+                      data-testid="pdf-semester-input"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="modeClass">Mode of class</Label>
+                    <Input
+                      id="modeClass"
+                      value={pdfHeader.mode_of_class}
+                      onChange={(e) => setPdfHeader((p) => ({ ...p, mode_of_class: e.target.value }))}
+                      placeholder="OFFLINE"
+                      data-testid="pdf-mode-input"
+                    />
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
 
             <Card>
               <CardHeader>

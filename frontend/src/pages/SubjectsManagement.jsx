@@ -10,10 +10,13 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Switch } from "@/components/ui/switch";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Plus, ArrowRight, ArrowLeft, Pencil, Trash2, BookOpen } from "lucide-react";
+import { Plus, ArrowRight, ArrowLeft, Pencil, Trash2, BookOpen, FlaskConical } from "lucide-react";
 import { toast } from "sonner";
 
-const emptyForm = { name: "", code: "", year: 1, requires_lab: false, lectures_per_week: 2, lab_sessions_per_week: 1 };
+const emptyForm = {
+  name: "", code: "", year: 1, requires_lab: false, is_lab_only: false,
+  lectures_per_week: 2, lab_sessions_per_week: 1, lab_duration_slots: 1,
+};
 
 export default function SubjectsManagement({ user, token, logout }) {
   const { sessionId } = useParams();
@@ -55,11 +58,25 @@ export default function SubjectsManagement({ user, token, logout }) {
     setEditing(null);
   };
 
+  // Open the dialog pre-configured for a standalone lab (a lab-credit course
+  // not attached to any theory subject — some semesters have these).
+  const openLabDialog = () => {
+    const firstYear = (session?.years || [])[0] || 1;
+    setFormData({
+      ...emptyForm, year: firstYear,
+      is_lab_only: true, requires_lab: true, lectures_per_week: 0,
+    });
+    setEditing(null);
+    setDialogOpen(true);
+  };
+
   const handleEdit = (s) => {
     setFormData({
       name: s.name, code: s.code, year: s.year, requires_lab: !!s.requires_lab,
+      is_lab_only: !!s.is_lab_only,
       lectures_per_week: s.lectures_per_week ?? 2,
       lab_sessions_per_week: s.lab_sessions_per_week ?? 1,
+      lab_duration_slots: s.lab_duration_slots ?? 1,
     });
     setEditing(s.subject_id);
     setDialogOpen(true);
@@ -77,9 +94,11 @@ export default function SubjectsManagement({ user, token, logout }) {
         name: formData.name.trim(),
         code: formData.code.trim().toUpperCase(),
         year: Number(formData.year),
-        requires_lab: formData.requires_lab,
-        lectures_per_week: Number(formData.lectures_per_week),
+        requires_lab: formData.is_lab_only ? true : formData.requires_lab,
+        is_lab_only: formData.is_lab_only,
+        lectures_per_week: formData.is_lab_only ? 0 : Number(formData.lectures_per_week),
         lab_sessions_per_week: Number(formData.lab_sessions_per_week),
+        lab_duration_slots: Number(formData.lab_duration_slots) || 1,
       };
       if (editing) {
         await axios.put(`/api/sessions/${sessionId}/subjects/${editing}`, payload, {
@@ -146,7 +165,18 @@ export default function SubjectsManagement({ user, token, logout }) {
             </p>
           </div>
 
-          <Dialog open={dialogOpen} onOpenChange={(open) => { setDialogOpen(open); if (!open) resetForm(); }}>
+          <div className="flex gap-3">
+            <Button
+              variant="outline"
+              className="border-emerald-300 text-emerald-700 hover:bg-emerald-50"
+              data-testid="add-lab-btn"
+              disabled={sessionYears.length === 0}
+              onClick={openLabDialog}
+            >
+              <FlaskConical className="w-4 h-4 mr-2" />
+              Add Lab
+            </Button>
+            <Dialog open={dialogOpen} onOpenChange={(open) => { setDialogOpen(open); if (!open) resetForm(); }}>
             <DialogTrigger asChild>
               <Button className="bg-blue-600 hover:bg-blue-700 btn-primary" data-testid="add-subject-btn" disabled={sessionYears.length === 0}>
                 <Plus className="w-4 h-4 mr-2" />
@@ -155,9 +185,15 @@ export default function SubjectsManagement({ user, token, logout }) {
             </DialogTrigger>
             <DialogContent>
               <DialogHeader>
-                <DialogTitle className="font-serif">{editing ? "Edit Subject" : "Add Subject"}</DialogTitle>
+                <DialogTitle className="font-serif">
+                  {formData.is_lab_only
+                    ? (editing ? "Edit Standalone Lab" : "Add Standalone Lab")
+                    : (editing ? "Edit Subject" : "Add Subject")}
+                </DialogTitle>
                 <DialogDescription>
-                  Code + name + year. Toggle &ldquo;Has Lab&rdquo; if the subject also runs a lab.
+                  {formData.is_lab_only
+                    ? "A lab-only credit course not attached to any theory subject. Pick how long each lab session runs."
+                    : "Code + name + year. Toggle “Has Lab” if the subject also runs a lab."}
                 </DialogDescription>
               </DialogHeader>
               <form onSubmit={handleSubmit} className="space-y-4 mt-4">
@@ -191,64 +227,87 @@ export default function SubjectsManagement({ user, token, logout }) {
                   </div>
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="subjectName">Subject Name *</Label>
+                  <Label htmlFor="subjectName">{formData.is_lab_only ? "Lab Name *" : "Subject Name *"}</Label>
                   <Input
                     id="subjectName"
                     value={formData.name}
                     onChange={(e) => setFormData((prev) => ({ ...prev, name: e.target.value }))}
-                    placeholder="Data Structures"
+                    placeholder={formData.is_lab_only ? "Design Thinking Lab" : "Data Structures"}
                     required
                     data-testid="subject-name-input"
                   />
                 </div>
-                <div className="flex items-center space-x-3 p-4 rounded-lg bg-slate-50">
-                  <Switch
-                    id="requiresLab"
-                    checked={formData.requires_lab}
-                    onCheckedChange={(checked) => setFormData((prev) => ({ ...prev, requires_lab: checked }))}
-                    data-testid="requires-lab-switch"
-                  />
-                  <div>
-                    <Label htmlFor="requiresLab" className="cursor-pointer">Has Lab Component</Label>
-                    <p className="text-xs text-slate-500">If on, each section gets lab sessions per batch per week for this subject.</p>
-                  </div>
-                </div>
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="lecturesPerWeek">Lectures / week</Label>
-                    <Input
-                      id="lecturesPerWeek"
-                      type="number" min="0" max="6"
-                      value={formData.lectures_per_week}
-                      onChange={(e) => setFormData((prev) => ({ ...prev, lectures_per_week: parseInt(e.target.value, 10) || 0 }))}
-                      data-testid="subject-lectures-input"
+                {!formData.is_lab_only && (
+                  <div className="flex items-center space-x-3 p-4 rounded-lg bg-slate-50">
+                    <Switch
+                      id="requiresLab"
+                      checked={formData.requires_lab}
+                      onCheckedChange={(checked) => setFormData((prev) => ({ ...prev, requires_lab: checked }))}
+                      data-testid="requires-lab-switch"
                     />
-                    <p className="text-xs text-slate-500">Theory periods/week (set by credits). Default 2.</p>
+                    <div>
+                      <Label htmlFor="requiresLab" className="cursor-pointer">Has Lab Component</Label>
+                      <p className="text-xs text-slate-500">If on, each section gets lab sessions per batch per week for this subject.</p>
+                    </div>
                   </div>
+                )}
+                <div className="grid grid-cols-2 gap-4">
+                  {!formData.is_lab_only && (
+                    <div className="space-y-2">
+                      <Label htmlFor="lecturesPerWeek">Lectures / week</Label>
+                      <Input
+                        id="lecturesPerWeek"
+                        type="number" min="0" max="6"
+                        value={formData.lectures_per_week}
+                        onChange={(e) => setFormData((prev) => ({ ...prev, lectures_per_week: parseInt(e.target.value, 10) || 0 }))}
+                        data-testid="subject-lectures-input"
+                      />
+                      <p className="text-xs text-slate-500">Theory periods/week (set by credits). Default 2.</p>
+                    </div>
+                  )}
                   <div className="space-y-2">
                     <Label htmlFor="labPerWeek">Lab sessions / week</Label>
                     <Input
                       id="labPerWeek"
-                      type="number" min="0" max="4"
+                      type="number" min={formData.is_lab_only ? "1" : "0"} max="4"
                       value={formData.lab_sessions_per_week}
                       onChange={(e) => setFormData((prev) => ({ ...prev, lab_sessions_per_week: parseInt(e.target.value, 10) || 0 }))}
-                      disabled={!formData.requires_lab}
+                      disabled={!formData.requires_lab && !formData.is_lab_only}
                       data-testid="subject-lab-input"
                     />
-                    <p className="text-xs text-slate-500">Per batch, per week. Only used if &ldquo;Has Lab&rdquo; is on.</p>
+                    <p className="text-xs text-slate-500">Per batch, per week.{formData.is_lab_only ? "" : " Only used if “Has Lab” is on."}</p>
                   </div>
+                  {(formData.requires_lab || formData.is_lab_only) && (
+                    <div className="space-y-2">
+                      <Label>Lab duration</Label>
+                      <Select
+                        value={String(formData.lab_duration_slots)}
+                        onValueChange={(v) => setFormData((prev) => ({ ...prev, lab_duration_slots: Number(v) }))}
+                      >
+                        <SelectTrigger data-testid="lab-duration-select">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="1">1 slot (1h 40m)</SelectItem>
+                          <SelectItem value="2">2 slots (3h 20m — full morning)</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      <p className="text-xs text-slate-500">How long one lab session runs. 2-slot labs occupy a full morning block (cannot span lunch).</p>
+                    </div>
+                  )}
                 </div>
                 <div className="flex justify-end gap-3 pt-4">
                   <Button type="button" variant="outline" onClick={() => { setDialogOpen(false); resetForm(); }}>
                     Cancel
                   </Button>
                   <Button type="submit" className="bg-blue-600 hover:bg-blue-700" disabled={saving} data-testid="save-subject-btn">
-                    {saving ? "Saving..." : editing ? "Update" : "Add Subject"}
+                    {saving ? "Saving..." : editing ? "Update" : formData.is_lab_only ? "Add Lab" : "Add Subject"}
                   </Button>
                 </div>
               </form>
             </DialogContent>
-          </Dialog>
+            </Dialog>
+          </div>
         </div>
 
         {sessionYears.length === 0 ? (
@@ -290,7 +349,7 @@ export default function SubjectsManagement({ user, token, logout }) {
                       <TableRow>
                         <TableHead>Code</TableHead>
                         <TableHead>Name</TableHead>
-                        <TableHead>Has Lab</TableHead>
+                        <TableHead>Type</TableHead>
                         <TableHead>Per week</TableHead>
                         <TableHead className="text-right">Actions</TableHead>
                       </TableRow>
@@ -301,13 +360,15 @@ export default function SubjectsManagement({ user, token, logout }) {
                           <TableCell className="font-mono font-medium">{s.code}</TableCell>
                           <TableCell>{s.name}</TableCell>
                           <TableCell>
-                            <span className={`badge ${s.requires_lab ? "badge-success" : "badge-warning"}`}>
-                              {s.requires_lab ? "Yes" : "No"}
+                            <span className={`badge ${s.is_lab_only ? "badge-success" : s.requires_lab ? "badge-success" : "badge-warning"}`}>
+                              {s.is_lab_only ? "Lab only" : s.requires_lab ? "Theory + Lab" : "Theory"}
                             </span>
                           </TableCell>
                           <TableCell className="text-sm text-slate-600">
-                            {(s.lectures_per_week ?? 2)}T
-                            {s.requires_lab ? ` + ${(s.lab_sessions_per_week ?? 1)}L/batch` : ""}
+                            {s.is_lab_only
+                              ? `${s.lab_sessions_per_week ?? 1}L/batch`
+                              : `${s.lectures_per_week ?? 2}T${s.requires_lab ? ` + ${s.lab_sessions_per_week ?? 1}L/batch` : ""}`}
+                            {s.requires_lab && (s.lab_duration_slots ?? 1) > 1 ? " • double slot" : ""}
                           </TableCell>
                           <TableCell className="text-right">
                             <Button variant="ghost" size="icon" onClick={() => handleEdit(s)} data-testid={`edit-subject-${s.subject_id}`}>

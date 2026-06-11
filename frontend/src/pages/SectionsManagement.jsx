@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
 import { ArrowRight, ArrowLeft, GraduationCap, Info } from "lucide-react";
 import { toast } from "sonner";
 
@@ -15,6 +16,8 @@ export default function SectionsManagement({ user, token, logout }) {
   const [loading, setLoading] = useState(true);
   const [session, setSession] = useState(null);
   const [sections, setSections] = useState([]);
+  // section_id -> room text being edited (uncommitted)
+  const [roomDrafts, setRoomDrafts] = useState({});
 
   useEffect(() => {
     fetchData();
@@ -35,6 +38,24 @@ export default function SectionsManagement({ user, token, logout }) {
       navigate("/dashboard");
     } finally {
       setLoading(false);
+    }
+  };
+
+  const saveRoom = async (sec) => {
+    const draft = roomDrafts[sec.section_id];
+    if (draft === undefined || draft === (sec.room || "")) return; // unchanged
+    try {
+      await axios.put(
+        `/api/sessions/${sessionId}/sections/${sec.section_id}/room`,
+        { room: draft },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      setSections((prev) =>
+        prev.map((s) => (s.section_id === sec.section_id ? { ...s, room: draft.trim() || null } : s))
+      );
+      toast.success(`Room saved for ${sec.name}`);
+    } catch (error) {
+      toast.error("Failed to save room");
     }
   };
 
@@ -75,6 +96,7 @@ export default function SectionsManagement({ user, token, logout }) {
               Sections are auto-generated from your year configuration in Session Setup.
               Each section is split into <strong>Batch-1</strong> and <strong>Batch-2</strong> for labs.
               To change section counts or strength, go back to Session Setup.
+              You can set each section&rsquo;s <strong>Room No</strong> here &mdash; it appears on the official PDF header.
             </p>
           </div>
         </div>
@@ -127,6 +149,7 @@ export default function SectionsManagement({ user, token, logout }) {
                         <TableHead>Stream</TableHead>
                         <TableHead>Strength</TableHead>
                         <TableHead>Batches</TableHead>
+                        <TableHead>Room No (PDF)</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
@@ -141,6 +164,19 @@ export default function SectionsManagement({ user, token, logout }) {
                           <TableCell>{sec.strength}</TableCell>
                           <TableCell className="text-slate-500 text-sm">
                             Batch-1 ({Math.ceil(sec.strength / 2)}) + Batch-2 ({Math.floor(sec.strength / 2)})
+                          </TableCell>
+                          <TableCell>
+                            <Input
+                              className="h-8 w-32"
+                              placeholder="e.g. GFCL-1"
+                              value={roomDrafts[sec.section_id] ?? (sec.room || "")}
+                              onChange={(e) =>
+                                setRoomDrafts((prev) => ({ ...prev, [sec.section_id]: e.target.value }))
+                              }
+                              onBlur={() => saveRoom(sec)}
+                              onKeyDown={(e) => { if (e.key === "Enter") e.target.blur(); }}
+                              data-testid={`room-input-${sec.section_id}`}
+                            />
                           </TableCell>
                         </TableRow>
                       ))}

@@ -38,9 +38,10 @@ The data model is rigidly shaped by AU's CSE conventions:
 
 - **Session** owns everything; user picks which years (subset of 1,2,3,4).
 - **YearConfig** (per session, per year): number of 4-yr sections + number of 6-yr sections + strength per section. Saving a YearConfig **auto-generates Sections** in the DB — frontend never POSTs sections directly. Labels: a single 4-yr section is `{y}/4 CSE`; multiple 4-yr get `{y}/4 CSE - N`; 6-yr always numbered `{y}/6 CSE - N`.
-- **Section** carries `year`, `stream` ("4yr"/"6yr"), `section_number`, `name`, `strength`. Sections are read-only in the UI; SectionsManagement is a viewer.
+- **Section** carries `year`, `stream` ("4yr"/"6yr"), `section_number`, `name`, `strength`, and an optional `room` (editable in SectionsManagement; shown on the official PDF header and preserved by name when sections regenerate). Everything else about sections is read-only in the UI.
 - **Batch** is implicit: every section has Batch-1 and Batch-2 (half strength each). Stored only as an integer column on `TimetableEntry`.
-- **Subject** is per-year (not per-section): defining a subject for year 2 applies it to every year-2 section. Each section gets `lectures_per_week` lectures/subject/week (default 2) + (if `requires_lab`) `lab_sessions_per_week` lab sessions per batch/week (default 1). These per-subject counts are customizable in SubjectsManagement for credit-based loads.
+- **Subject** is per-year (not per-section): defining a subject for year 2 applies it to every year-2 section. Each section gets `lectures_per_week` lectures/subject/week (default 2) + (if `requires_lab`) `lab_sessions_per_week` lab sessions per batch/week (default 1). These per-subject counts are customizable in SubjectsManagement for credit-based loads. Duplicate `(code, year)` pairs are rejected.
+- **Standalone labs** (`is_lab_only=True`, "Add Lab" in the UI): lab-credit courses not attached to any theory subject — `requires_lab` is forced on, `lectures_per_week` forced to 0. Any lab-bearing subject also has `lab_duration_slots` (1 = one 1h40m slot, 2 = a contiguous 3h20m block that can't span lunch — with the fixed 3-slot day that means the full morning). Multi-slot labs produce one `TimetableEntry` per covered slot sharing a `lab_group_id`, which views/exports use to merge them into one block.
 - **Faculty** has a `designation` (one of 5) and a `pattern` (one of `2T+1L`, `2T+2L`, `3T+1L`). Pattern dictates how many distinct (subject, section) theory and lab assignments the faculty can hold. Faculty may also have `unavailable_days` (a subset of working days they can't teach — enforced at placement). Designation rules live in `DESIGNATION_*` dicts at the top of `server.py` — single source of truth, exposed via `/api/meta/designations`.
 - **FacultyChoice** records `(faculty, subject, section, role)` preferences. For categories 1–3 (Senior/Associate/Assistant Professor) these are **hard** and honored in category order. For categories 4–5 (ADHOC / Research Scholar) they are **soft hints**. Anything not pinned is auto-filled by the generator.
 
@@ -67,7 +68,15 @@ Constants at the top of `server.py`:
 - 3 teaching slots/day: `09:00–10:40`, `10:40–12:20`, `13:30–15:10` (each = 1h 40min, valid for both theory and lab)
 - Lunch: `12:20–13:30` (blocked)
 
-These are intentionally hardcoded — the user requested AU's schedule and removed slot-configuration UI. If the schedule ever changes, edit `FIXED_WORKING_DAYS` / `FIXED_TIME_SLOTS` and the generator picks it up.
+These are intentionally hardcoded — the user requested AU's schedule and removed slot-configuration UI. If the schedule ever changes, edit `FIXED_WORKING_DAYS` / `FIXED_TIME_SLOTS` and the generator picks it up (`LUNCH_AFTER_SLOT_INDEX` marks where lunch sits, which also gates where 2-slot labs may start).
+
+## PDF export
+
+`/api/sessions/{id}/export-pdf?view_type=...`:
+
+- `master` / `year` / `faculty`: the generic landscape grid (filtered views require `filter_id`, else 400).
+- `section` (requires `filter_id`) and `all_sections` (one page per section): the **official department template** replicated from `timetable_template.png` — header rows (dept / college / "TENTATIVE TIME TABLE WITH EFFECT FROM" / CLASS-Mode-Room), each 1h40m slot split into two 50-min AM/PM period columns, a vertical LUNCH BREAK column, merged class blocks (2-slot labs span 4 period columns), and a subject→faculty legend with a HEAD OF THE DEPARTMENT signature column. See `_build_section_template_page`.
+- The header text is customizable per session (`dept_name`, `college_name`, `effective_from`, `semester_label`, `mode_of_class` — edited in SessionSetup's "PDF Header" card); room comes from `section.room`.
 
 ## Conventions worth knowing
 
