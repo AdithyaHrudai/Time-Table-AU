@@ -8,7 +8,7 @@ from motor.motor_asyncio import AsyncIOMotorClient
 import os
 import logging
 from pathlib import Path
-from pydantic import BaseModel, Field, ConfigDict, EmailStr
+from pydantic import BaseModel, Field, ConfigDict, EmailStr, model_validator
 from typing import List, Optional, Dict, Any, Tuple
 import uuid
 from datetime import datetime, timezone, timedelta
@@ -201,11 +201,31 @@ class SessionConfig(BaseModel):
 
 # ---- Year config (sections per stream per year) ----
 
+def _coerce_year_strengths(data: Any) -> Any:
+    """Backfill the per-stream strengths from the legacy single
+    `strength_per_section` field so older stored docs / API clients keep
+    working after the 4-yr vs 6-yr strength split."""
+    if isinstance(data, dict):
+        legacy = data.get("strength_per_section")
+        if legacy is not None:
+            data = dict(data)
+            data.setdefault("strength_4yr", legacy)
+            data.setdefault("strength_6yr", legacy)
+    return data
+
+
 class YearConfigCreate(BaseModel):
     year: int
     sections_4yr: int = 0
     sections_6yr: int = 0
-    strength_per_section: int = 60
+    # 4-yr B.Tech and 6-yr integrated sections can have different strengths.
+    strength_4yr: int = 60
+    strength_6yr: int = 60
+
+    @model_validator(mode="before")
+    @classmethod
+    def _backfill_strengths(cls, data):
+        return _coerce_year_strengths(data)
 
 class YearConfig(BaseModel):
     model_config = ConfigDict(extra="ignore")
@@ -214,7 +234,13 @@ class YearConfig(BaseModel):
     year: int
     sections_4yr: int = 0
     sections_6yr: int = 0
-    strength_per_section: int = 60
+    strength_4yr: int = 60
+    strength_6yr: int = 60
+
+    @model_validator(mode="before")
+    @classmethod
+    def _backfill_strengths(cls, data):
+        return _coerce_year_strengths(data)
 
 
 # ---- Section (auto-generated from YearConfig) ----
@@ -678,28 +704,26 @@ def _build_sections_for_year(session_id: str, yc: YearConfig) -> List[Section]:
       - 6-yr stream: always numbered → "{y}/6 CSE - {n}".
     """
     sections: List[Section] = []
-    half = max(1, yc.strength_per_section // 2)
-    _ = half  # batch sizes are derived at view time; sections carry total strength
 
     if yc.sections_4yr == 1:
         sections.append(Section(
             session_id=session_id, year=yc.year, stream="4yr",
             section_number=None, name=f"{yc.year}/4 CSE",
-            strength=yc.strength_per_section,
+            strength=yc.strength_4yr,
         ))
     elif yc.sections_4yr > 1:
         for i in range(1, yc.sections_4yr + 1):
             sections.append(Section(
                 session_id=session_id, year=yc.year, stream="4yr",
                 section_number=i, name=f"{yc.year}/4 CSE - {i}",
-                strength=yc.strength_per_section,
+                strength=yc.strength_4yr,
             ))
 
     for i in range(1, yc.sections_6yr + 1):
         sections.append(Section(
             session_id=session_id, year=yc.year, stream="6yr",
             section_number=i, name=f"{yc.year}/6 CSE - {i}",
-            strength=yc.strength_per_section,
+            strength=yc.strength_6yr,
         ))
 
     return sections
@@ -754,8 +778,10 @@ async def upsert_year_config(
         raise HTTPException(status_code=400, detail="Section counts cannot be negative")
     if payload.sections_4yr + payload.sections_6yr == 0:
         raise HTTPException(status_code=400, detail="Add at least one section (4-yr or 6-yr)")
-    if payload.strength_per_section < 2:
-        raise HTTPException(status_code=400, detail="Strength must be at least 2 (for 2 batches)")
+    if payload.sections_4yr > 0 and payload.strength_4yr < 2:
+        raise HTTPException(status_code=400, detail="4-yr section strength must be at least 2 (for 2 batches)")
+    if payload.sections_6yr > 0 and payload.strength_6yr < 2:
+        raise HTTPException(status_code=400, detail="6-yr section strength must be at least 2 (for 2 batches)")
 
     existing = await db.year_configs.find_one(
         {"session_id": session_id, "year": year}, {"_id": 0}
@@ -767,7 +793,8 @@ async def upsert_year_config(
             year=year,
             sections_4yr=payload.sections_4yr,
             sections_6yr=payload.sections_6yr,
-            strength_per_section=payload.strength_per_section,
+            strength_4yr=payload.strength_4yr,
+            strength_6yr=payload.strength_6yr,
         )
         await db.year_configs.update_one(
             {"session_id": session_id, "year": year},
@@ -778,7 +805,8 @@ async def upsert_year_config(
             session_id=session_id, year=year,
             sections_4yr=payload.sections_4yr,
             sections_6yr=payload.sections_6yr,
-            strength_per_section=payload.strength_per_section,
+            strength_4yr=payload.strength_4yr,
+            strength_6yr=payload.strength_6yr,
         )
         await db.year_configs.insert_one(yc.model_dump())
 

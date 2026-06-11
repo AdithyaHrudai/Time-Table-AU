@@ -18,7 +18,8 @@ const blankYearCfg = (year) => ({
   year,
   sections_4yr: year === 1 ? 1 : 0,
   sections_6yr: 0,
-  strength_per_section: 60,
+  strength_4yr: 60,
+  strength_6yr: 60,
 });
 
 export default function SessionSetup({ user, token, logout }) {
@@ -29,7 +30,7 @@ export default function SessionSetup({ user, token, logout }) {
   const [session, setSession] = useState(null);
   const [sessionName, setSessionName] = useState("");
   const [years, setYears] = useState([]);
-  // year -> {year, sections_4yr, sections_6yr, strength_per_section}
+  // year -> {year, sections_4yr, sections_6yr, strength_4yr, strength_6yr}
   const [yearCfgs, setYearCfgs] = useState({});
   // Optional PDF-header customization (official section timetable export).
   const [pdfHeader, setPdfHeader] = useState({
@@ -101,8 +102,12 @@ export default function SessionSetup({ user, token, logout }) {
         toast.error(`Year ${y}: add at least one section (4-yr or 6-yr stream)`);
         return false;
       }
-      if (!cfg.strength_per_section || cfg.strength_per_section < 2) {
-        toast.error(`Year ${y}: strength must be at least 2 (for 2 batches)`);
+      if ((cfg.sections_4yr || 0) > 0 && (!cfg.strength_4yr || cfg.strength_4yr < 2)) {
+        toast.error(`Year ${y}: 4-yr section strength must be at least 2 (for 2 batches)`);
+        return false;
+      }
+      if ((cfg.sections_6yr || 0) > 0 && (!cfg.strength_6yr || cfg.strength_6yr < 2)) {
+        toast.error(`Year ${y}: 6-yr section strength must be at least 2 (for 2 batches)`);
         return false;
       }
     }
@@ -132,7 +137,8 @@ export default function SessionSetup({ user, token, logout }) {
             year: y,
             sections_4yr: Number(cfg.sections_4yr) || 0,
             sections_6yr: Number(cfg.sections_6yr) || 0,
-            strength_per_section: Number(cfg.strength_per_section) || 60,
+            strength_4yr: Number(cfg.strength_4yr) || 60,
+            strength_6yr: Number(cfg.strength_6yr) || 60,
           },
           { headers: { Authorization: `Bearer ${token}` } }
         );
@@ -227,8 +233,8 @@ export default function SessionSetup({ user, token, logout }) {
                       6-yr → <code>{y}/6 CSE - 1, 2, …</code>. Each section is auto-split into Batch-1 and Batch-2.
                     </CardDescription>
                   </CardHeader>
-                  <CardContent>
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                  <CardContent className="space-y-6">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                       <div className="space-y-2">
                         <Label>4-yr B.Tech sections</Label>
                         <Input
@@ -236,6 +242,17 @@ export default function SessionSetup({ user, token, logout }) {
                           value={cfg.sections_4yr}
                           onChange={(e) => updateYearCfg(y, "sections_4yr", parseInt(e.target.value, 10) || 0)}
                           data-testid={`y${y}-sections-4yr`}
+                        />
+                        <p className="text-xs text-slate-500">Strength applies to all 4-yr sections this year.</p>
+                      </div>
+                      <div className="space-y-2">
+                        <Label>4-yr strength per section</Label>
+                        <Input
+                          type="number" min="2" max="240"
+                          value={cfg.strength_4yr}
+                          disabled={(cfg.sections_4yr || 0) === 0}
+                          onChange={(e) => updateYearCfg(y, "strength_4yr", parseInt(e.target.value, 10) || 60)}
+                          data-testid={`y${y}-strength-4yr`}
                         />
                       </div>
                       <div className="space-y-2">
@@ -246,14 +263,16 @@ export default function SessionSetup({ user, token, logout }) {
                           onChange={(e) => updateYearCfg(y, "sections_6yr", parseInt(e.target.value, 10) || 0)}
                           data-testid={`y${y}-sections-6yr`}
                         />
+                        <p className="text-xs text-slate-500">Strength applies to all 6-yr sections this year.</p>
                       </div>
                       <div className="space-y-2">
-                        <Label>Strength per section</Label>
+                        <Label>6-yr strength per section</Label>
                         <Input
                           type="number" min="2" max="240"
-                          value={cfg.strength_per_section}
-                          onChange={(e) => updateYearCfg(y, "strength_per_section", parseInt(e.target.value, 10) || 60)}
-                          data-testid={`y${y}-strength`}
+                          value={cfg.strength_6yr}
+                          disabled={(cfg.sections_6yr || 0) === 0}
+                          onChange={(e) => updateYearCfg(y, "strength_6yr", parseInt(e.target.value, 10) || 60)}
+                          data-testid={`y${y}-strength-6yr`}
                         />
                       </div>
                     </div>
